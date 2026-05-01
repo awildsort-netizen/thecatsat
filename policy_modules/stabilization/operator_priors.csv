@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.40,Precise remaining repair.
+bridge,0.16,Limited graph movement.
+loop_escape,0.08,Avoid destructive perturbation.
+memory,0.36,Preserve stable structure.

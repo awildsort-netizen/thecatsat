@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+progress,<=,0.12,Early fraction of the solver budget.
+entropy,>=,0.75,Assignments are still high entropy.
+revisit,<=,0.20,State-space reuse is not yet dominant.
+stagnation,<=,0.25,Not enough history to diagnose a plateau.

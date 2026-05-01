@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.12,Keep conflict information in the mix.
+bridge,0.18,Move through graph alternatives.
+loop_escape,0.50,Primary trap-breaking channel.
+memory,0.20,Use memory as context rather than anchor.

@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.16,Keep core pressure visible.
+bridge,0.20,Search alternate graph paths.
+loop_escape,0.30,Escape stale basins.
+memory,0.34,Use accumulated plateau evidence.

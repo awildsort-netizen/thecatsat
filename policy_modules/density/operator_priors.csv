@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.58,Primary descent channel.
+bridge,0.18,Keep graph-aware alternatives available.
+loop_escape,0.14,Prevent local pressure myopia.
+memory,0.10,Light reuse only.

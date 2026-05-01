@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+revisit,>=,0.65,Fiber visits or runner revisit signal is high.
+stagnation,>=,0.65,Recent best-unsat progress is weak.
+loop_pressure,>=,0.55,Loop-escape channel has strong signal.
+unsat_ratio,>,0.05,Still has unresolved structure to escape from.

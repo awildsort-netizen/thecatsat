@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.24,Retain conflict direction.
+bridge,0.36,Primary structure-shaping channel.
+loop_escape,0.24,Prevent early narrowing.
+memory,0.16,Low-memory refinement.

@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+entropy,>=,0.75,Assignments remain highly volatile.
+unsat_ratio,between,0.15..0.65,Search is neither solved nor fully dense.
+stagnation,<=,0.60,Not yet a hard plateau.
+integration,<=,0.55,Global structure is still forming.

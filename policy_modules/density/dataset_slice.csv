@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+unsat_ratio,>=,0.50,Large fraction of clauses remain unsatisfied.
+heat,>=,0.55,Clause frustration field is hot.
+entropy,<=,0.75,Enough structure exists to prefer descent.
+progress,>=,0.10,Past the initial cold-start window.

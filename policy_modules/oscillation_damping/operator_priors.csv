@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.18,Local repair pressure.
+bridge,0.25,Route around repeated neighborhoods.
+loop_escape,0.35,Primary damping channel.
+memory,0.22,Remember recent reversible behavior.

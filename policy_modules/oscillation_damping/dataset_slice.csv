@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+stagnation,>=,0.55,Recent best-unsat progress is weak.
+revisit,>=,0.45,Repeated neighborhoods are visible.
+loop_pressure,>=,0.45,Loop channel is active.
+entropy,between,0.45..0.75,Motion remains volatile but not purely random.

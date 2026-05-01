@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+unsat_ratio,<=,0.10,Few clauses remain unsatisfied.
+integration,>=,0.55,Global structure is relatively coherent.
+heat,<=,0.35,Clause frustration is mostly cooled.
+stagnation,<=,0.45,Not yet a long plateau.

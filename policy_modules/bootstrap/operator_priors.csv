@@ -1,0 +1,5 @@
+operator,prior,role
+pressure,0.30,Find immediate conflict gradients.
+bridge,0.25,Probe graph connectivity.
+loop_escape,0.25,Keep broad movement available.
+memory,0.20,Avoid trusting memory too early.

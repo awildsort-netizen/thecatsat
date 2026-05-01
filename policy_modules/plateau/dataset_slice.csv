@@ -1,0 +1,5 @@
+metric,operator,threshold,description
+stagnation,>=,0.85,Long horizon without best-unsat improvement.
+memory_pressure,>=,0.55,Memory field has accumulated strong structure.
+revisit,>=,0.55,Repeated neighborhoods dominate.
+unsat_ratio,>,0.02,There is still unresolved mass.
