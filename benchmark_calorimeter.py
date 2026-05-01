@@ -592,7 +592,7 @@ def empty_operator_metrics(operator: str) -> dict[str, float]:
 
 
 def operator_metric_prefix(operator: str) -> str:
-    return f"trace_{operator}"
+    return f"trace_{operator.lstrip('_')}"
 
 
 def excitable_trace_chain_snapshot(
@@ -1310,14 +1310,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--policy",
-        choices=("baseline", "excitable_fiber"),
+        choices=("baseline", "excitable_fiber", "curriculum_seeds"),
         default="baseline",
-        help="Motion policy membrane: baseline or excitable fiber.",
+        help="Motion policy membrane: baseline, excitable fiber, or curriculum seeds.",
     )
     parser.add_argument(
         "--compare-policies",
         action="store_true",
-        help="Run each seed twice: baseline and excitable_fiber.",
+        help="Run each seed across baseline, excitable_fiber, and curriculum_seeds.",
     )
     parser.add_argument(
         "--spike-threshold",
@@ -1370,7 +1370,11 @@ def main() -> None:
     trace_sink = trace_rows if args.trace_out is not None else None
     trace_checkpoints = normalized_trace_checkpoints(args.trace_checkpoints)
     adaptive_modes = [False, True] if args.compare_adaptive else [args.adaptive]
-    policies = ["baseline", "excitable_fiber"] if args.compare_policies else [args.policy]
+    policies = (
+        ["baseline", "excitable_fiber", "curriculum_seeds"]
+        if args.compare_policies
+        else [args.policy]
+    )
     for kind in args.kinds:
         for trial in range(args.trials):
             seed = args.seed_start + trial

@@ -7,12 +7,14 @@ import math
 from collections.abc import Mapping
 
 import sat_field
+import sat_curriculum
 import sat_furnace
 import sprite_detector
 from composer import Composer, FieldContext, FieldOperator, compose_validators, require_keys, require_types
 
 
 EXCITABLE_POLICY = "excitable_fiber"
+CURRICULUM_SEED_POLICY = sat_curriculum.CURRICULUM_SEED_POLICY
 EFFECT_BASIS = ("pressure", "bridge", "loop_escape", "memory")
 
 
@@ -371,12 +373,37 @@ def _concentration_field_operator() -> FieldOperator:
             for prev_value, value in zip(prev, current)
         ]
         concentrations = _normalize_distribution(transported)
-        return {"concentrations": concentrations}
+        seed_features = sat_curriculum.extract_features(ctx)
+        seed_routing = sat_curriculum.route_seeds(seed_features)
+        if str(ctx.get("policy", "baseline")) == CURRICULUM_SEED_POLICY:
+            concentrations = sat_curriculum.blend_concentrations(
+                concentrations,
+                seed_routing.concentration_prior,
+            )
+        return {
+            "concentrations": concentrations,
+            "curriculum_seed_names": seed_routing.seed_names,
+            "curriculum_seed_routes": list(seed_routing.weights),
+            "curriculum_seed_active": seed_routing.active_seed,
+            "curriculum_seed_active_index": seed_routing.active_index,
+            "curriculum_seed_threshold": seed_routing.threshold,
+            "curriculum_seed_excitatory_bias": seed_routing.excitatory_bias,
+            "curriculum_seed_inhibitory_bias": seed_routing.inhibitory_bias,
+        }
 
     return FieldOperator(
         name="solver.concentration_field",
         inputs=("operator_effects", "fiber_memory", "prev_concentrations", "heat", "entropy", "integration", "unsatisfied", "formula"),
-        outputs=("concentrations",),
+        outputs=(
+            "concentrations",
+            "curriculum_seed_names",
+            "curriculum_seed_routes",
+            "curriculum_seed_active",
+            "curriculum_seed_active_index",
+            "curriculum_seed_threshold",
+            "curriculum_seed_excitatory_bias",
+            "curriculum_seed_inhibitory_bias",
+        ),
         validate_inputs=require_keys(("operator_effects", "fiber_memory", "heat", "entropy", "integration", "unsatisfied", "formula")),
         run=_run,
     )
@@ -390,17 +417,33 @@ def _excitation_inhibition_operator() -> FieldOperator:
         entropy = sat_furnace.clamp01(float(ctx["entropy"]))
         integration = sat_furnace.clamp01(float(ctx["integration"]))
         adaptive_gain = sat_furnace.clamp01(float(ctx.get("adaptive_gain", 0.0)))
+        seed_excitatory_bias = 0.0
+        seed_inhibitory_bias = 0.0
+        if str(ctx.get("policy", "baseline")) == CURRICULUM_SEED_POLICY:
+            seed_excitatory_bias = float(ctx.get("curriculum_seed_excitatory_bias", 0.0))
+            seed_inhibitory_bias = float(ctx.get("curriculum_seed_inhibitory_bias", 0.0))
 
         excitatory = []
         inhibitory = []
         for concentration in concentrations:
             excitatory.append(
                 concentration
-                * (0.35 + 0.50 * heat + 0.30 * (1.0 - integration) + 0.20 * adaptive_gain)
+                * (
+                    0.35
+                    + seed_excitatory_bias
+                    + 0.50 * heat
+                    + 0.30 * (1.0 - integration)
+                    + 0.20 * adaptive_gain
+                )
             )
             inhibitory.append(
                 concentration
-                * (0.30 + 0.55 * entropy + 0.15 * (1.0 - heat))
+                * (
+                    0.30
+                    + seed_inhibitory_bias
+                    + 0.55 * entropy
+                    + 0.15 * (1.0 - heat)
+                )
             )
         local_field = [exc - inh for exc, inh in zip(excitatory, inhibitory)]
         return {
@@ -412,7 +455,16 @@ def _excitation_inhibition_operator() -> FieldOperator:
 
     return FieldOperator(
         name="solver.excitation_inhibition",
-        inputs=("concentrations", "heat", "entropy", "integration", "adaptive_gain"),
+        inputs=(
+            "concentrations",
+            "heat",
+            "entropy",
+            "integration",
+            "adaptive_gain",
+            "curriculum_seed_excitatory_bias",
+            "curriculum_seed_inhibitory_bias",
+            "policy",
+        ),
         outputs=("excitatory_field", "inhibitory_field", "local_field", "field_strength"),
         validate_inputs=require_keys(("concentrations", "heat", "entropy", "integration")),
         run=_run,
@@ -422,9 +474,12 @@ def _excitation_inhibition_operator() -> FieldOperator:
 def _spike_gate_operator() -> FieldOperator:
     """Apply smooth threshold activation to the local field strength."""
     def _run(ctx: FieldContext) -> Mapping[str, object]:
-        if str(ctx.get("policy", "baseline")) != EXCITABLE_POLICY:
+        policy = str(ctx.get("policy", "baseline"))
+        if policy not in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY}:
             return {"spike_strength": 0.0}
         threshold = float(ctx.get("spike_threshold", 0.35))
+        if policy == CURRICULUM_SEED_POLICY:
+            threshold = float(ctx.get("curriculum_seed_threshold", threshold))
         slope = max(0.1, float(ctx.get("spike_slope", 8.0)))
         field_strength = float(ctx.get("field_strength", 0.0))
         spike_strength = 1.0 / (1.0 + math.exp(-slope * (field_strength - threshold)))
@@ -432,7 +487,7 @@ def _spike_gate_operator() -> FieldOperator:
 
     return FieldOperator(
         name="solver.spike_gate",
-        inputs=("policy", "field_strength", "spike_threshold", "spike_slope"),
+        inputs=("policy", "field_strength", "spike_threshold", "spike_slope", "curriculum_seed_threshold"),
         outputs=("spike_strength",),
         validate_inputs=require_keys(("field_strength",)),
         run=_run,
@@ -446,7 +501,7 @@ def _mixed_drive_operator() -> FieldOperator:
         effects = ctx["operator_effects"]
         basis_vectors = [effects[name] for name in EFFECT_BASIS]
         vector_length = len(basis_vectors[0]) if basis_vectors else 0
-        if policy != EXCITABLE_POLICY or vector_length == 0:
+        if policy not in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY} or vector_length == 0:
             return {"mixed_drive": [0.0 for _ in range(vector_length)]}
 
         concentrations = list(ctx["concentrations"])
@@ -807,7 +862,8 @@ def _trace_append_operator() -> FieldOperator:
         mixed_drive = list(ctx.get("mixed_drive", []))
         spike_strength = float(ctx.get("spike_strength", 0.0))
         policy = str(ctx.get("policy", "baseline"))
-        excitable_active = policy == EXCITABLE_POLICY
+        excitable_active = policy in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY}
+        curriculum_active = policy == CURRICULUM_SEED_POLICY
         memory_scale = float(ctx["memory_scale"])
         previous_unsatisfied = int(ctx["previous_unsatisfied"])
         previous_integration = float(ctx["previous_integration"])
@@ -831,6 +887,8 @@ def _trace_append_operator() -> FieldOperator:
             ], excitable_active, 0.0),
             ("excitable_spike", [spike_strength], excitable_active and spike_strength > 0.01, spike_strength),
             ("excitable_mixture", mixed_drive, excitable_active and spike_strength > 0.01, spike_strength),
+            ("curriculum_seed_route", list(ctx.get("curriculum_seed_routes", [])), curriculum_active, 0.0),
+            ("curriculum_seed_active", [float(ctx.get("curriculum_seed_active_index", 0))], curriculum_active, 0.0),
             ("spin_update", drive_values, True, memory_scale),
         ):
             sat_furnace._trace_operator(
@@ -1061,8 +1119,8 @@ def _trial_metrics_row_operator() -> FieldOperator:
             "steps": int(ctx["steps"]),
             "adaptive": adaptive,
             "policy": policy,
-            "spike_threshold": spike_threshold if policy == EXCITABLE_POLICY else 0.0,
-            "spike_slope": spike_slope if policy == EXCITABLE_POLICY else 0.0,
+            "spike_threshold": spike_threshold if policy in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY} else 0.0,
+            "spike_slope": spike_slope if policy in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY} else 0.0,
             "memory_decay": float(ctx.get("memory_decay", 0.0)) if adaptive else 0.0,
             "memory_drive": float(ctx.get("memory_drive", 0.0)) if adaptive else 0.0,
             "random_restarts": int(ctx.get("baseline_restarts", 0)),
@@ -1159,6 +1217,13 @@ def _excitable_trace_metrics(
     field_traces = [trace for trace in traces if trace.operator == "excitable_field"]
     spike_traces = [trace for trace in traces if trace.operator == "excitable_spike"]
     mixture_traces = [trace for trace in traces if trace.operator == "excitable_mixture"]
+    seed_route_traces = [
+        trace for trace in traces if trace.operator == "curriculum_seed_route"
+    ]
+    seed_active_traces = [
+        trace for trace in traces if trace.operator == "curriculum_seed_active"
+    ]
+    excitable_policy = policy in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY}
     steps = max(1, len(spike_traces))
     active_spikes = [trace for trace in spike_traces if trace.active]
     mean_spike = (
@@ -1182,8 +1247,17 @@ def _excitable_trace_metrics(
             sum(trace.output_mean for trace in mixture_traces)
             / max(1, len(mixture_traces))
         ),
+        "curriculum_seed_route_present": bool(seed_route_traces),
+        "curriculum_seed_route_activation_rate": (
+            len([trace for trace in seed_route_traces if trace.active])
+            / max(1, len(seed_route_traces))
+        ),
+        "curriculum_seed_active_mean_index": (
+            sum(trace.output_mean for trace in seed_active_traces)
+            / max(1, len(seed_active_traces))
+        ),
         "excitable_trace_chain_ok": bool(
-            policy != EXCITABLE_POLICY
+            not excitable_policy
             or (
                 concentration_traces
                 and field_traces
