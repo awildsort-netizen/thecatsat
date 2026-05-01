@@ -1,4 +1,4 @@
-# Policy Modules
+# Policies
 
 Each directory is a dataset-born curriculum seed module. A module is not a
 fully trained policy yet; it is the benchmarkable seed of one.
