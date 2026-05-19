@@ -658,7 +658,23 @@ def _trace_append_operator() -> FieldOperator:
         mixed_drive = list(ctx.get("mixed_drive", []))
         spike_strength = float(ctx.get("spike_strength", 0.0))
         policy = str(ctx.get("policy", "baseline"))
-        excitable_active = policy in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY}
+        # Tests-as-AF: an operator trace is "active" when the current
+        # concentration climate decompresses it, not merely because the
+        # policy name licenses it. We threshold the normalized
+        # concentration vector against a uniform-prior floor — any
+        # channel above 1/len(channels) is enriched relative to uniform
+        # and counts as activation. Fall back to the legacy policy gate
+        # when no concentration field has been computed yet (early
+        # epochs, older callers).
+        policy_excitable = policy in {EXCITABLE_POLICY, CURRICULUM_SEED_POLICY}
+        if concentrations:
+            uniform = 1.0 / len(concentrations)
+            climate_threshold = uniform * 1.05
+            excitable_active = (
+                max(concentrations) > climate_threshold or policy_excitable
+            )
+        else:
+            excitable_active = policy_excitable
         curriculum_active = policy == CURRICULUM_SEED_POLICY
         memory_scale = float(ctx["memory_scale"])
         previous_unsatisfied = int(ctx["previous_unsatisfied"])

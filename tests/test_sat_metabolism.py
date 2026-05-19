@@ -124,5 +124,61 @@ class HelperTests(unittest.TestCase):
         )
 
 
+class ConcentrationClimateActivationTests(unittest.TestCase):
+    """OperatorTrace.active should follow the concentration climate.
+
+    Under the baseline policy, the excitable_* operators used to be
+    flat-off because the policy name didn't license them. With the
+    activation-factor change in sat_composer, an enriched concentration
+    channel (any channel above the uniform-prior floor) decompresses
+    those traces into the `active` state even on the baseline policy.
+    """
+
+    def test_baseline_policy_activates_under_concentration_climate(self) -> None:
+        import random
+
+        import sat_furnace
+
+        rng = random.Random(11)
+        formula, planted = sat_furnace.generate_formula(
+            "sat",
+            variables=8,
+            clauses=24,
+            clause_size=3,
+            rng=rng,
+        )
+
+        result = sat_furnace.run_furnace(
+            formula=formula,
+            variables=8,
+            steps=20,
+            rng=rng,
+            temperature=0.85,
+            learning_rate=0.18,
+            inertia=0.5,
+            noise=0.05,
+            planted_assignment=planted,
+            adaptive=False,
+            memory_decay=0.92,
+            memory_drive=0.12,
+            policy="baseline",
+        )
+
+        excitable_traces = [
+            trace
+            for trace in result.operator_traces
+            if trace.operator == "excitable_concentration"
+        ]
+        self.assertGreater(len(excitable_traces), 0)
+        # At least one step should have an enriched concentration
+        # climate and therefore an active excitable_concentration
+        # trace. (Step 0 starts uniform, so we accept any-step.)
+        self.assertTrue(
+            any(trace.active for trace in excitable_traces),
+            "excitable_concentration should activate under enriched "
+            "climate even on baseline policy",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
