@@ -140,6 +140,87 @@ def run_many(
     return tuple(paths), distribution
 
 
+@dataclass(frozen=True)
+class RoundResult:
+    """One round of the closed feedback loop.
+
+    ``field_in`` is the concentration field used by this round's sampler.
+    ``paths`` are the sampled trajectories; ``distribution`` counts their
+    signatures. ``trace`` is the flat sequence of ``L:<chosen>`` tokens
+    pooled from every sampled path — the gene record the next round
+    warms its field from.
+    """
+
+    field_in: dict[str, float]
+    paths: tuple[SampledPath, ...]
+    distribution: Counter
+    trace: tuple[str, ...]
+
+
+def run_rounds(
+    n_rounds: int,
+    trials_per_round: int,
+    steps: Sequence[tuple[str, Sequence[str]]],
+    initial_field: Mapping[str, float],
+    rng: random.Random,
+    *,
+    decay: float = 1.0,
+    bump: float = 1.0,
+    window_scale: Mapping[str, float] | None = None,
+    climate_tokens: Sequence[str] = (),
+) -> tuple[RoundResult, ...]:
+    """Close the loop: sample, harvest gene trace, warm next field, repeat.
+
+    Each round:
+      1. Samples ``trials_per_round`` paths under the current field.
+      2. Pools every chosen step as ``L:<name>`` tokens — the round's trace.
+      3. Builds the next field by decaying current weights by ``decay``
+         (``1.0`` = no decay, ``0.0`` = full forgetting) then adding fresh
+         evidence from the trace via ``concentration_from_gene_tokens``.
+
+    ``climate_tokens`` are prepended to each round's trace before warming —
+    e.g. ``["W:dev"]`` opens a window so every literal in this round is
+    amplified when ``window_scale={"dev": 3.0}``. The climate biases the
+    *next* field; eligibility at every step is still the hard gate.
+
+    A round with no eligible-and-chosen names (impossible for non-empty
+    steps) would leave the field untouched aside from decay; this is by
+    design — silence cools the prior.
+    """
+
+    if n_rounds < 0:
+        raise ValueError(f"n_rounds must be >= 0, got {n_rounds}")
+    if not 0.0 <= decay <= 1.0:
+        raise ValueError(f"decay must be in [0,1], got {decay}")
+
+    field: dict[str, float] = dict(initial_field)
+    results: list[RoundResult] = []
+    for _ in range(n_rounds):
+        paths, distribution = run_many(trials_per_round, steps, field, rng)
+        trace = tuple(step.gene_token for path in paths for step in path.steps)
+        warming = concentration_from_gene_tokens(
+            tuple(climate_tokens) + trace,
+            base=0.0,
+            bump=bump,
+            window_scale=window_scale,
+        )
+        next_field: dict[str, float] = {
+            name: weight * decay for name, weight in field.items()
+        }
+        for name, weight in warming.items():
+            next_field[name] = next_field.get(name, 0.0) + weight
+        results.append(
+            RoundResult(
+                field_in=dict(field),
+                paths=paths,
+                distribution=distribution,
+                trace=trace,
+            )
+        )
+        field = next_field
+    return tuple(results)
+
+
 def concentration_from_gene_tokens(
     tokens: Iterable[str],
     *,
