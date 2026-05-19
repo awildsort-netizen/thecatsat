@@ -26,6 +26,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
+from streamable_genes import stream
+
 
 @dataclass(frozen=True)
 class SampledStep:
@@ -136,3 +138,48 @@ def run_many(
         paths.append(path)
         distribution[path.signature] += 1
     return tuple(paths), distribution
+
+
+def concentration_from_gene_tokens(
+    tokens: Iterable[str],
+    *,
+    base: float = 1.0,
+    bump: float = 1.0,
+    window_scale: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    """Build a concentration field from a streamable gene-token stream.
+
+    Each ``L:<name>`` token is evidence that ``<name>`` was emitted, and warms
+    its weight. The first time we see a name we seed it at ``base``; each
+    subsequent occurrence adds ``bump``, so repeated literals accumulate.
+
+    Non-literal tokens (``E``, ``A:``, ``D:``, raw ``W:``/``R``) never create
+    a provider entry — only literals warm concentrations. ``W:<label>`` /
+    ``R`` still scope the climate around the literals inside them: if
+    ``window_scale`` is provided, the per-occurrence bump for a literal
+    inside window ``label`` is multiplied by ``window_scale[label]`` (missing
+    labels default to 1.0). This is how local climates show up in the field
+    without inventing a separate per-window schema.
+
+    Motif backreferences (``M:i``) are expanded through the canonical decoder,
+    so ``D:1:a,b`` followed by ``M:1`` warms both ``a`` and ``b`` once.
+
+    The returned dict is suitable as-is for ``sample_provider`` / ``run_many``:
+    ineligible providers are ignored at sample time, so this function never
+    needs to know which names a downstream composer would accept.
+    """
+
+    if base < 0.0:
+        raise ValueError(f"base must be >= 0, got {base}")
+    if bump < 0.0:
+        raise ValueError(f"bump must be >= 0, got {bump}")
+    scale = dict(window_scale or {})
+    state = stream(tokens)
+    field: dict[str, float] = {}
+    for gene in state.emitted:
+        factor = scale.get(gene.window, 1.0) if gene.window is not None else 1.0
+        if gene.name not in field:
+            field[gene.name] = base + bump * factor
+        else:
+            field[gene.name] += bump * factor
+    return field

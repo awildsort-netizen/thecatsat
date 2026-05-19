@@ -6,7 +6,12 @@ from __future__ import annotations
 import random
 import unittest
 
-from concentration import run_many, sample_path, sample_provider
+from concentration import (
+    concentration_from_gene_tokens,
+    run_many,
+    sample_path,
+    sample_provider,
+)
 
 
 class TestSampleProvider(unittest.TestCase):
@@ -126,6 +131,110 @@ class TestRunMany(unittest.TestCase):
         rng = random.Random(0)
         with self.assertRaises(ValueError):
             run_many(-1, [("t", ("a",))], {}, rng)
+
+
+class TestConcentrationFromGeneTokens(unittest.TestCase):
+    def test_literal_warms_corresponding_provider(self):
+        field = concentration_from_gene_tokens(["L:foo", "L:bar", "E"])
+        self.assertIn("foo", field)
+        self.assertIn("bar", field)
+        self.assertGreater(field["foo"], 0.0)
+        self.assertGreater(field["bar"], 0.0)
+
+    def test_repeated_literals_accumulate_evidence(self):
+        field = concentration_from_gene_tokens(["L:foo", "L:foo", "L:foo", "L:bar", "E"])
+        # foo seen 3x, bar seen 1x — foo must be strictly heavier.
+        self.assertGreater(field["foo"], field["bar"])
+
+    def test_non_literal_tokens_create_no_provider_weights(self):
+        field = concentration_from_gene_tokens(
+            ["A:carry", "W:hot", "R", "D:1:foo,bar", "E"]
+        )
+        # No L: tokens were emitted, no M: expanded. No providers.
+        self.assertEqual(field, {})
+
+    def test_end_token_does_not_create_provider(self):
+        field = concentration_from_gene_tokens(["L:foo", "E"])
+        self.assertEqual(set(field), {"foo"})
+        self.assertNotIn("E", field)
+
+    def test_motif_expansion_warms_through_backreference(self):
+        field = concentration_from_gene_tokens(
+            ["D:1:foo,bar", "M:1", "L:foo", "E"]
+        )
+        # M:1 expands to L:foo, L:bar. Then L:foo. So foo seen 2x, bar 1x.
+        self.assertIn("foo", field)
+        self.assertIn("bar", field)
+        self.assertGreater(field["foo"], field["bar"])
+
+    def test_window_scale_amplifies_literals_inside_window(self):
+        tokens = ["L:outside", "W:hot", "L:inside", "R", "E"]
+        flat = concentration_from_gene_tokens(tokens)
+        scaled = concentration_from_gene_tokens(
+            tokens, window_scale={"hot": 5.0}
+        )
+        # Outside the window the weight is unchanged.
+        self.assertEqual(flat["outside"], scaled["outside"])
+        # Inside the window the literal is amplified.
+        self.assertGreater(scaled["inside"], flat["inside"])
+
+    def test_window_scale_does_not_invent_providers(self):
+        # A window with no literals inside it leaves no trace in the field.
+        field = concentration_from_gene_tokens(
+            ["W:hot", "R", "E"], window_scale={"hot": 100.0}
+        )
+        self.assertEqual(field, {})
+
+    def test_base_and_bump_are_independent_knobs(self):
+        # base=10 with bump=0 means seen-once-or-many literals get the same
+        # weight: pure presence/absence flag.
+        field = concentration_from_gene_tokens(
+            ["L:foo", "L:foo", "L:bar", "E"], base=10.0, bump=0.0
+        )
+        self.assertEqual(field["foo"], field["bar"])
+        self.assertEqual(field["foo"], 10.0)
+
+    def test_negative_base_or_bump_raises(self):
+        with self.assertRaises(ValueError):
+            concentration_from_gene_tokens(["L:foo", "E"], base=-1.0)
+        with self.assertRaises(ValueError):
+            concentration_from_gene_tokens(["L:foo", "E"], bump=-1.0)
+
+    def test_field_feeds_sample_provider_without_overriding_eligibility(self):
+        # Build a field that strongly warms a name that is NOT in the
+        # eligible set. The eligibility rule must still hold.
+        field = concentration_from_gene_tokens(
+            ["L:foo", "L:foo", "L:foo", "L:foo", "L:foo", "E"]
+        )
+        eligible = ("a", "b")
+        rng = random.Random(0)
+        chosen = {sample_provider(eligible, field, rng) for _ in range(500)}
+        self.assertEqual(chosen, {"a", "b"})
+        self.assertNotIn("foo", chosen)
+
+    def test_field_shifts_run_many_distribution_among_eligibles(self):
+        # A gene trace heavy on "a" should bias the sampler toward "a"
+        # when both "a" and "b" are eligible.
+        field = concentration_from_gene_tokens(
+            ["L:a", "L:a", "L:a", "L:a", "L:a", "L:b", "E"]
+        )
+        steps = [("t", ("a", "b"))]
+        rng_flat = random.Random(33)
+        rng_warm = random.Random(33)
+        _, flat = run_many(2000, steps, {}, rng_flat)
+        _, warm = run_many(2000, steps, field, rng_warm)
+        self.assertGreater(warm[("a",)], flat[("a",)])
+
+    def test_windowed_trace_produces_different_field_than_unwindowed(self):
+        unwindowed = ["L:a", "L:b", "E"]
+        windowed = ["W:hot", "L:a", "R", "L:b", "E"]
+        flat_field = concentration_from_gene_tokens(unwindowed)
+        warm_field = concentration_from_gene_tokens(
+            windowed, window_scale={"hot": 10.0}
+        )
+        # Unwindowed: a and b are equal. Windowed under hot=10x: a >> b.
+        self.assertAlmostEqual(flat_field["a"], flat_field["b"])
+        self.assertGreater(warm_field["a"], warm_field["b"])
 
 
 if __name__ == "__main__":
