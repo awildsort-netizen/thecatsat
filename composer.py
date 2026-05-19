@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping
+import inspect
+import re
+from dataclasses import dataclass, fields, is_dataclass
+from types import ModuleType
+from typing import Any, Callable, Iterable, Mapping, get_type_hints
 
 FieldContext = dict[str, object]
 Validator = Callable[[Mapping[str, object]], None]
@@ -39,6 +42,25 @@ class FieldOperator:
     enabled: Callable[[FieldContext], bool] | None = None
     validate_inputs: Validator | None = None
     validate_outputs: Validator | None = None
+
+
+@dataclass(frozen=True)
+class OperatorCandidate:
+    function: Callable[..., object]
+    name: str
+    module: str
+    parameters: tuple[str, ...]
+    return_type: object | None
+    inferred_outputs: tuple[str, ...]
+    locality_terms: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProviderFit:
+    candidate: OperatorCandidate
+    target: str
+    score: float
+    reasons: tuple[str, ...]
 
 
 class Composer:
@@ -156,6 +178,152 @@ class Composer:
             raise KeyError(f"operator {operator.name} missing outputs: {details}")
         if operator.validate_outputs is not None:
             operator.validate_outputs(output_values)
+
+
+
+def operator_candidate(function: Callable[..., object]) -> OperatorCandidate:
+    signature = inspect.signature(function)
+    type_hints = get_type_hints(function)
+    parameters = tuple(
+        name
+        for name, parameter in signature.parameters.items()
+        if parameter.kind
+        in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD, parameter.KEYWORD_ONLY)
+    )
+    return_type = type_hints.get("return")
+    name = function.__name__
+    module = function.__module__
+    return OperatorCandidate(
+        function=function,
+        name=name,
+        module=module,
+        parameters=parameters,
+        return_type=return_type,
+        inferred_outputs=infer_function_outputs(name, return_type),
+        locality_terms=tokenize_terms(f"{module} {function.__qualname__}"),
+    )
+
+
+def discover_operator_candidates(module: ModuleType) -> tuple[OperatorCandidate, ...]:
+    return tuple(
+        operator_candidate(member)
+        for _name, member in inspect.getmembers(module, inspect.isfunction)
+        if member.__module__ == module.__name__
+    )
+
+
+def infer_function_outputs(name: str, return_type: object | None = None) -> tuple[str, ...]:
+    if return_type is not None and is_dataclass(return_type):
+        field_names = tuple(field.name for field in fields(return_type))
+        if len(field_names) > 1:
+            return field_names
+    return (name,)
+
+
+def rank_provider_candidates(
+    target: str,
+    candidates: Iterable[OperatorCandidate],
+    nearby_terms: Iterable[str] = (),
+    required_type: object | None = None,
+) -> tuple[ProviderFit, ...]:
+    fits = (
+        provider_fit(target, candidate, nearby_terms, required_type)
+        for candidate in candidates
+    )
+    return tuple(
+        sorted(
+            (fit for fit in fits if fit.score > 0.0),
+            key=lambda fit: (-fit.score, fit.candidate.module, fit.candidate.name),
+        )
+    )
+
+
+def choose_provider(
+    target: str,
+    candidates: Iterable[OperatorCandidate],
+    nearby_terms: Iterable[str] = (),
+    required_type: object | None = None,
+) -> ProviderFit | None:
+    return next(
+        iter(rank_provider_candidates(target, candidates, nearby_terms, required_type)),
+        None,
+    )
+
+
+def provider_fit(
+    target: str,
+    candidate: OperatorCandidate,
+    nearby_terms: Iterable[str] = (),
+    required_type: object | None = None,
+) -> ProviderFit:
+    target_terms = set(tokenize_terms(target))
+    output_terms = set(term for output in candidate.inferred_outputs for term in tokenize_terms(output))
+    return_terms = set(tokenize_type(candidate.return_type))
+    parameter_terms = set(term for parameter in candidate.parameters for term in tokenize_terms(parameter))
+    local_terms = set(candidate.locality_terms)
+    nearby = set(term for term in nearby_terms if term)
+
+    reason_scores = (
+        (target in candidate.inferred_outputs, 4.0, "exact_output"),
+        (target_terms <= output_terms and bool(target_terms), 2.5, "output_terms"),
+        (bool(target_terms & return_terms), 1.5, "return_type"),
+        (required_type is not None and candidate.return_type == required_type, 2.0, "required_type"),
+        (bool(target_terms & local_terms), 0.75, "locality"),
+        (bool(target_terms & parameter_terms), 0.5, "parameter_terms"),
+        (bool(nearby & local_terms), 0.5, "nearby_locality"),
+    )
+    matched = tuple(reason for active, _score, reason in reason_scores if active)
+    score = sum(score for active, score, _reason in reason_scores if active)
+    return ProviderFit(candidate=candidate, target=target, score=score, reasons=matched)
+
+
+def materialize_function_operator(
+    candidate: OperatorCandidate,
+    outputs: Iterable[str] | None = None,
+    name: str | None = None,
+) -> FieldOperator:
+    output_keys = tuple(outputs or candidate.inferred_outputs)
+    signature = inspect.signature(candidate.function)
+    required_inputs = tuple(
+        key
+        for key in candidate.parameters
+        if signature.parameters[key].default is inspect.Parameter.empty
+    )
+
+    def _run(context: FieldContext) -> Mapping[str, object]:
+        kwargs = {
+            key: context[key]
+            for key in candidate.parameters
+            if key in context or signature.parameters[key].default is inspect.Parameter.empty
+        }
+        result = candidate.function(**kwargs)
+        if len(output_keys) == 1:
+            return {output_keys[0]: result}
+        if is_dataclass(result):
+            return {key: getattr(result, key) for key in output_keys}
+        if isinstance(result, Mapping):
+            return {key: result[key] for key in output_keys}
+        raise TypeError(f"operator {candidate.name} produced unsupported multi-output result")
+
+    return FieldOperator(
+        name=name or candidate.name,
+        inputs=required_inputs,
+        outputs=output_keys,
+        validate_inputs=require_keys(required_inputs),
+        run=_run,
+    )
+
+
+def tokenize_terms(value: object) -> tuple[str, ...]:
+    words = re.sub(r"[^0-9A-Za-z]+", "_", str(value)).split("_")
+    return tuple(word.lower() for word in words if word)
+
+
+def tokenize_type(value: object | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    type_name = getattr(value, "__name__", str(value))
+    return tokenize_terms(type_name)
 
 
 def require_keys(keys: Iterable[str]) -> Validator:

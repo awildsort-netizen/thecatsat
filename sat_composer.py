@@ -10,7 +10,14 @@ import sat_field
 import sat_curriculum
 import sat_furnace
 import sprite_detector
-from composer import Composer, FieldContext, FieldOperator, compose_validators, require_keys, require_types
+from composer import (
+    Composer,
+    FieldContext,
+    FieldOperator,
+    materialize_function_operator,
+    operator_candidate,
+    require_keys,
+)
 
 
 EXCITABLE_POLICY = "excitable_fiber"
@@ -18,75 +25,52 @@ CURRICULUM_SEED_POLICY = sat_curriculum.CURRICULUM_SEED_POLICY
 EFFECT_BASIS = ("pressure", "bridge", "loop_escape", "memory")
 
 
-def _formula_graph_operator() -> FieldOperator:
-    return FieldOperator(
-        name="formula.graph",
-        inputs=("formula",),
-        outputs=("formula_graph",),
-        validate_inputs=compose_validators(
-            require_keys(("formula",)),
-            require_types({"formula": list}),
-        ),
-        validate_outputs=require_types({"formula_graph": sat_field.FormulaGraph}),
-        run=lambda context: {"formula_graph": sat_field.formula_graph(context["formula"])},
+def formula_graph(formula: list) -> sat_field.FormulaGraph:
+    return sat_field.formula_graph(formula)
+
+
+def graph_adjacency(formula_graph: sat_field.FormulaGraph) -> dict:
+    return sat_field.formula_graph_to_adjacency(formula_graph)
+
+
+def spatial_samples(spatial_rows: list | tuple) -> list:
+    return sat_field.spatial_rows_to_samples(spatial_rows)
+
+
+def graph_runners(
+    spatial_samples: list,
+    graph_adjacency: dict,
+    runner_quantile: float = 0.90,
+) -> list:
+    return sprite_detector.detect_graph_runners(
+        spatial_samples,
+        graph_adjacency,
+        quantile=float(runner_quantile),
     )
+
+
+def _function_operator(
+    function,
+    outputs: tuple[str, ...] | None = None,
+    name: str | None = None,
+) -> FieldOperator:
+    return materialize_function_operator(operator_candidate(function), outputs=outputs, name=name)
+
+
+def _formula_graph_operator() -> FieldOperator:
+    return _function_operator(formula_graph)
 
 
 def _formula_adjacency_operator() -> FieldOperator:
-    return FieldOperator(
-        name="formula.adjacency",
-        inputs=("formula_graph",),
-        outputs=("graph_adjacency",),
-        validate_inputs=compose_validators(
-            require_keys(("formula_graph",)),
-            require_types({"formula_graph": sat_field.FormulaGraph}),
-        ),
-        validate_outputs=require_types({"graph_adjacency": dict}),
-        run=lambda context: {
-            "graph_adjacency": sat_field.formula_graph_to_adjacency(context["formula_graph"])
-        },
-    )
+    return _function_operator(graph_adjacency)
 
 
 def _spatial_samples_operator() -> FieldOperator:
-    return FieldOperator(
-        name="spatial.samples",
-        inputs=("spatial_rows",),
-        outputs=("spatial_samples",),
-        validate_inputs=compose_validators(
-            require_keys(("spatial_rows",)),
-            require_types({"spatial_rows": (list, tuple)}),
-        ),
-        validate_outputs=require_types({"spatial_samples": list}),
-        run=lambda context: {
-            "spatial_samples": sat_field.spatial_rows_to_samples(context["spatial_rows"])
-        },
-    )
+    return _function_operator(spatial_samples)
 
 
 def _graph_runners_operator() -> FieldOperator:
-    return FieldOperator(
-        name="graph.runners",
-        inputs=("spatial_samples", "graph_adjacency"),
-        outputs=("graph_runners",),
-        validate_inputs=compose_validators(
-            require_keys(("spatial_samples", "graph_adjacency")),
-            require_types({"spatial_samples": list, "graph_adjacency": dict}),
-        ),
-        validate_outputs=require_types({"graph_runners": list}),
-        run=_run_graph_runners,
-    )
-
-
-def _run_graph_runners(context: FieldContext) -> Mapping[str, object]:
-    quantile = context.get("runner_quantile", 0.90)
-    return {
-        "graph_runners": sprite_detector.detect_graph_runners(
-            context["spatial_samples"],
-            context["graph_adjacency"],
-            quantile=float(quantile),
-        )
-    }
+    return _function_operator(graph_runners)
 
 
 def build_graph_composer() -> Composer:
@@ -101,242 +85,192 @@ def build_graph_composer() -> Composer:
 
 
 def run_graph_targets(targets: tuple[str, ...] | list[str], context: Mapping[str, object]) -> dict[str, object]:
-    return build_graph_composer().run(targets, context)
+    graph_context = {"runner_quantile": 0.90, **dict(context)}
+    return build_graph_composer().run(targets, graph_context)
 
 
 # ---------------------------------------------------------------------------
 # Phase 2: SAT furnace step operators
 # ---------------------------------------------------------------------------
 
-def _formula_generate_operator() -> FieldOperator:
-    """Wraps sat_furnace.generate_formula; produces formula + planted_assignment."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        formula, planted = sat_furnace.generate_formula(
-            str(ctx["kind"]),
-            int(ctx["variables"]),
-            int(ctx["clauses"]),
-            int(ctx["clause_size"]),
-            ctx["rng"],
-        )
-        return {"formula": formula, "planted_assignment": planted}
+def generate_formula(kind: str, variables: int, clauses: int, clause_size: int, rng) -> dict:
+    formula, planted = sat_furnace.generate_formula(
+        str(kind), int(variables), int(clauses), int(clause_size), rng
+    )
+    return {"formula": formula, "planted_assignment": planted}
 
-    return FieldOperator(
-        name="formula.generate",
-        inputs=("kind", "variables", "clauses", "clause_size", "rng"),
+
+def validate_formula(formula: list, variables: int) -> list:
+    for clause in formula:
+        for var, _ in clause:
+            if var < 0 or var >= variables:
+                raise ValueError(f"variable index {var} out of range [0, {variables})")
+    return formula
+
+
+def clause_pressure(formula: list, spins: list, temperature: float) -> dict:
+    pressures, clause_frustrations, unsatisfied = sat_furnace._clause_pressures(
+        formula, spins, float(temperature)
+    )
+    return {
+        "pressures": pressures,
+        "clause_frustrations": clause_frustrations,
+        "unsatisfied": unsatisfied,
+    }
+
+
+def influence_lift(formula: list, clause_frustrations: list, variables: int) -> list:
+    return sat_furnace._variable_influence_matrix(formula, clause_frustrations, int(variables))
+
+
+def adaptive_gate(
+    samples: list,
+    unsatisfied: int,
+    best_unsatisfied: int,
+    adaptive: bool = False,
+) -> dict:
+    if not adaptive:
+        return {"adaptive_active": False, "adaptive_reason": "inactive_disabled"}
+    active, reason = sat_furnace._adaptive_activation_state(
+        samples, int(unsatisfied), int(best_unsatisfied)
+    )
+    return {"adaptive_active": active, "adaptive_reason": reason}
+
+
+def adaptive_strength(
+    samples: list,
+    heat: float,
+    free_energy: float,
+    integration: float,
+    entropy: float,
+    unsatisfied: int,
+    best_unsatisfied: int,
+    adaptive_active: bool = False,
+) -> float:
+    if not adaptive_active:
+        return 0.0
+    return sat_furnace._adaptive_strength(
+        samples,
+        float(heat),
+        float(free_energy),
+        float(integration),
+        float(entropy),
+        int(unsatisfied),
+        int(best_unsatisfied),
+    )
+
+
+def adaptive_control(
+    samples: list,
+    heat: float,
+    free_energy: float,
+    integration: float,
+    entropy: float,
+    unsatisfied: int,
+    best_unsatisfied: int,
+    adaptive_active: bool = False,
+    adaptive_gain: float = 1.0,
+):
+    if not adaptive_active:
+        return sat_furnace._default_control_state()
+    return sat_furnace._adaptive_control_state(
+        samples,
+        float(heat),
+        float(free_energy),
+        float(integration),
+        float(entropy),
+        int(unsatisfied),
+        int(best_unsatisfied),
+        float(adaptive_gain),
+    )
+
+
+def memory_init(variables: int, formula: list, memory_decay: float = 0.92):
+    return sat_furnace._initialize_fiber_bundle_memory(
+        int(variables), len(formula), float(memory_decay)
+    )
+
+
+def _formula_generate_operator() -> FieldOperator:
+    return _function_operator(
+        generate_formula,
         outputs=("formula", "planted_assignment"),
-        validate_inputs=require_keys(("kind", "variables", "clauses", "clause_size", "rng")),
-        run=_run,
+        name="formula.generate",
     )
 
 
 def _formula_validate_operator() -> FieldOperator:
-    """Validates formula length and variable bounds; passes formula through."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        formula = ctx["formula"]
-        variables = int(ctx["variables"])
-        for clause in formula:
-            for var, _ in clause:
-                if var < 0 or var >= variables:
-                    raise ValueError(f"variable index {var} out of range [0, {variables})")
-        return {"validated_formula": formula}
-
-    return FieldOperator(
-        name="formula.validate",
-        inputs=("formula", "variables"),
-        outputs=("validated_formula",),
-        validate_inputs=require_keys(("formula", "variables")),
-        run=_run,
-    )
+    return _function_operator(validate_formula, outputs=("validated_formula",), name="formula.validate")
 
 
 def _clause_pressure_operator() -> FieldOperator:
-    """Wraps sat_furnace._clause_pressures."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        pressures, clause_frustrations, unsatisfied = sat_furnace._clause_pressures(
-            ctx["formula"], ctx["spins"], float(ctx["temperature"])
-        )
-        return {
-            "pressures": pressures,
-            "clause_frustrations": clause_frustrations,
-            "unsatisfied": unsatisfied,
-        }
-
-    return FieldOperator(
-        name="solver.clause_pressure",
-        inputs=("formula", "spins", "temperature"),
+    return _function_operator(
+        clause_pressure,
         outputs=("pressures", "clause_frustrations", "unsatisfied"),
-        validate_inputs=require_keys(("formula", "spins", "temperature")),
-        run=_run,
+        name="solver.clause_pressure",
     )
 
 
 def _influence_lift_operator() -> FieldOperator:
-    """Wraps sat_furnace._variable_influence_matrix."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        return {
-            "influence_matrix": sat_furnace._variable_influence_matrix(
-                ctx["formula"], ctx["clause_frustrations"], int(ctx["variables"])
-            )
-        }
-
-    return FieldOperator(
-        name="solver.influence_lift",
-        inputs=("formula", "clause_frustrations", "variables"),
-        outputs=("influence_matrix",),
-        validate_inputs=require_keys(("formula", "clause_frustrations", "variables")),
-        run=_run,
-    )
+    return _function_operator(influence_lift, outputs=("influence_matrix",), name="solver.influence_lift")
 
 
 def _adaptive_gate_operator() -> FieldOperator:
-    """Wraps sat_furnace._adaptive_activation_state; gated by adaptive flag."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        if not ctx.get("adaptive", False):
-            return {"adaptive_active": False, "adaptive_reason": "inactive_disabled"}
-        active, reason = sat_furnace._adaptive_activation_state(
-            ctx["samples"], int(ctx["unsatisfied"]), int(ctx["best_unsatisfied"])
-        )
-        return {"adaptive_active": active, "adaptive_reason": reason}
-
-    return FieldOperator(
-        name="solver.adaptive_gate",
-        inputs=("adaptive", "samples", "unsatisfied", "best_unsatisfied"),
+    return _function_operator(
+        adaptive_gate,
         outputs=("adaptive_active", "adaptive_reason"),
-        validate_inputs=require_keys(("samples", "unsatisfied", "best_unsatisfied")),
-        run=_run,
+        name="solver.adaptive_gate",
     )
 
 
 def _adaptive_strength_operator() -> FieldOperator:
-    """Wraps sat_furnace._adaptive_strength; zero when adaptive gate is off."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        if not ctx.get("adaptive_active", False):
-            return {"adaptive_gain": 0.0}
-        gain = sat_furnace._adaptive_strength(
-            ctx["samples"],
-            float(ctx["heat"]),
-            float(ctx["free_energy"]),
-            float(ctx["integration"]),
-            float(ctx["entropy"]),
-            int(ctx["unsatisfied"]),
-            int(ctx["best_unsatisfied"]),
-        )
-        return {"adaptive_gain": gain}
-
-    return FieldOperator(
-        name="solver._adaptive_strength",
-        inputs=("adaptive_active", "samples", "heat", "free_energy", "integration", "entropy", "unsatisfied", "best_unsatisfied"),
-        outputs=("adaptive_gain",),
-        validate_inputs=require_keys(("adaptive_active", "samples", "unsatisfied", "best_unsatisfied")),
-        run=_run,
-    )
+    return _function_operator(adaptive_strength, outputs=("adaptive_gain",), name="solver._adaptive_strength")
 
 
 def _adaptive_control_operator() -> FieldOperator:
-    """Wraps sat_furnace._adaptive_control_state; falls back to default when inactive."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        if not ctx.get("adaptive_active", False):
-            return {"control_state": sat_furnace._default_control_state()}
-        control = sat_furnace._adaptive_control_state(
-            ctx["samples"],
-            float(ctx["heat"]),
-            float(ctx["free_energy"]),
-            float(ctx["integration"]),
-            float(ctx["entropy"]),
-            int(ctx["unsatisfied"]),
-            int(ctx["best_unsatisfied"]),
-            float(ctx.get("adaptive_gain", 1.0)),
-        )
-        return {"control_state": control}
-
-    return FieldOperator(
-        name="solver.adaptive_control",
-        inputs=("adaptive_active", "adaptive_gain", "samples", "heat", "free_energy", "integration", "entropy", "unsatisfied", "best_unsatisfied"),
-        outputs=("control_state",),
-        validate_inputs=require_keys(("adaptive_active", "samples", "unsatisfied", "best_unsatisfied")),
-        run=_run,
-    )
+    return _function_operator(adaptive_control, outputs=("control_state",), name="solver.adaptive_control")
 
 
 def _memory_init_operator() -> FieldOperator:
-    """Wraps sat_furnace._initialize_fiber_bundle_memory."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        return {
-            "fiber_memory": sat_furnace._initialize_fiber_bundle_memory(
-                int(ctx["variables"]),
-                len(ctx["formula"]),
-                float(ctx.get("memory_decay", 0.92)),
-            )
-        }
+    return _function_operator(memory_init, outputs=("fiber_memory",), name="solver.memory_init")
 
-    return FieldOperator(
-        name="solver.memory_init",
-        inputs=("variables", "formula"),
-        outputs=("fiber_memory",),
-        validate_inputs=require_keys(("variables", "formula")),
-        run=_run,
-    )
+
+def bridge_bias(influence_matrix: list) -> list:
+    return sat_furnace._graph_bridge_bias(influence_matrix)
+
+
+def loop_escape_bias(formula: list, clause_frustrations: list, variables: int) -> list:
+    return sat_furnace._loop_escape_bias(formula, clause_frustrations, int(variables))
+
+
+def memory_bias(fiber_memory, formula: list) -> list:
+    return sat_furnace._fiber_memory_bias(fiber_memory, formula)
+
+
+def operator_effects(
+    pressures: list,
+    bridge_bias: list,
+    _loop_escape_bias: list,
+    memory_bias: list,
+) -> dict:
+    return {
+        "pressure": list(pressures),
+        "bridge": list(bridge_bias),
+        "loop_escape": list(_loop_escape_bias),
+        "memory": list(memory_bias),
+    }
 
 
 def _bias_operators() -> list[FieldOperator]:
-    """Wraps _graph_bridge_bias, _loop_escape_bias, and _fiber_memory_bias."""
-    def _run_bridge(ctx: FieldContext) -> Mapping[str, object]:
-        return {"bridge_bias": sat_furnace._graph_bridge_bias(ctx["influence_matrix"])}
-
-    def _run_loop_escape(ctx: FieldContext) -> Mapping[str, object]:
-        return {
-            "_loop_escape_bias": sat_furnace._loop_escape_bias(
-                ctx["formula"], ctx["clause_frustrations"], int(ctx["variables"])
-            )
-        }
-
-    def _run_memory(ctx: FieldContext) -> Mapping[str, object]:
-        return {"memory_bias": sat_furnace._fiber_memory_bias(ctx["fiber_memory"], ctx["formula"])}
-
     return [
-        FieldOperator(
-            name="solver.bridge_bias",
-            inputs=("influence_matrix",),
-            outputs=("bridge_bias",),
-            validate_inputs=require_keys(("influence_matrix",)),
-            run=_run_bridge,
-        ),
-        FieldOperator(
-            name="solver._loop_escape_bias",
-            inputs=("formula", "clause_frustrations", "variables"),
-            outputs=("_loop_escape_bias",),
-            validate_inputs=require_keys(("formula", "clause_frustrations", "variables")),
-            run=_run_loop_escape,
-        ),
-        FieldOperator(
-            name="solver.memory_bias",
-            inputs=("fiber_memory", "formula"),
-            outputs=("memory_bias",),
-            validate_inputs=require_keys(("fiber_memory", "formula")),
-            run=_run_memory,
-        ),
+        _function_operator(bridge_bias, name="solver.bridge_bias"),
+        _function_operator(loop_escape_bias, outputs=("_loop_escape_bias",), name="solver._loop_escape_bias"),
+        _function_operator(memory_bias, name="solver.memory_bias"),
     ]
 
 
 def _operator_effects_operator() -> FieldOperator:
-    """Emit common-shape motion effect channels for policy mixing."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        return {
-            "operator_effects": {
-                "pressure": list(ctx["pressures"]),
-                "bridge": list(ctx["bridge_bias"]),
-                "loop_escape": list(ctx["_loop_escape_bias"]),
-                "memory": list(ctx["memory_bias"]),
-            }
-        }
-
-    return FieldOperator(
-        name="solver.operator_effects",
-        inputs=("pressures", "bridge_bias", "_loop_escape_bias", "memory_bias"),
-        outputs=("operator_effects",),
-        validate_inputs=require_keys(("pressures", "bridge_bias", "_loop_escape_bias", "memory_bias")),
-        run=_run,
-    )
+    return _function_operator(operator_effects, name="solver.operator_effects")
 
 
 def _concentration_field_operator() -> FieldOperator:
@@ -633,142 +567,108 @@ def build_solver_composer() -> Composer:
 # Phase B: inline epoch operators
 # ---------------------------------------------------------------------------
 
-def _thermo_metrics_operator() -> FieldOperator:
-    """B1 — heat, free_energy, integration, entropy from clause field."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        spins = ctx["spins"]
-        clause_frustrations = ctx["clause_frustrations"]
-        influence_matrix = ctx["influence_matrix"]
-        heat = (
-            sum(f * f for f in clause_frustrations)
-            / max(1, len(clause_frustrations))
-        )
-        free_energy = (
-            sat_furnace._statistics_like_variance(spins)
-            + sat_furnace._statistics_like_variance(clause_frustrations)
-        )
-        integration = sat_furnace._integration_score(influence_matrix)
-        entropy = sat_furnace._assignment_entropy(spins)
-        return {
-            "heat": heat,
-            "free_energy": free_energy,
-            "integration": integration,
-            "entropy": entropy,
-        }
+def thermo_metrics(spins: list, clause_frustrations: list, influence_matrix: list) -> dict:
+    heat = sum(f * f for f in clause_frustrations) / max(1, len(clause_frustrations))
+    free_energy = (
+        sat_furnace._statistics_like_variance(spins)
+        + sat_furnace._statistics_like_variance(clause_frustrations)
+    )
+    integration = sat_furnace._integration_score(influence_matrix)
+    entropy = sat_furnace._assignment_entropy(spins)
+    return {
+        "heat": heat,
+        "free_energy": free_energy,
+        "integration": integration,
+        "entropy": entropy,
+    }
 
-    return FieldOperator(
-        name="solver.thermo_metrics",
-        inputs=("spins", "clause_frustrations", "influence_matrix"),
+
+def best_tracker(
+    spins: list,
+    unsatisfied: int,
+    prev_best_spins: list,
+    prev_best_unsatisfied: int,
+) -> dict:
+    if int(unsatisfied) < int(prev_best_unsatisfied):
+        return {"best_spins": list(spins), "best_unsatisfied": int(unsatisfied)}
+    return {"best_spins": prev_best_spins, "best_unsatisfied": int(prev_best_unsatisfied)}
+
+
+def lock_assignment(unsatisfied: int, planted_assignment: list | None = None) -> list[float] | None:
+    if int(unsatisfied) == 0 and planted_assignment is not None:
+        return [1.0 if value else -1.0 for value in planted_assignment]
+    return None
+
+
+def cooling(t: int, steps: int) -> float:
+    return 1.0 - (int(t) / max(1, int(steps) - 1))
+
+
+def memory_scale(
+    control_state,
+    samples: list,
+    unsatisfied: int,
+    best_unsatisfied: int,
+    adaptive_gain: float = 0.0,
+) -> float:
+    return sat_furnace._action_memory_scale(
+        control_state.action,
+        samples,
+        int(unsatisfied),
+        int(best_unsatisfied),
+        float(adaptive_gain),
+    )
+
+
+def fiber_update(
+    fiber_memory,
+    formula: list,
+    spins: list,
+    pressures: list,
+    clause_frustrations: list,
+    influence_matrix: list,
+):
+    sat_furnace._update_fiber_bundle_memory(
+        fiber_memory,
+        formula,
+        spins,
+        pressures,
+        clause_frustrations,
+        influence_matrix,
+    )
+    return fiber_memory
+
+
+def _thermo_metrics_operator() -> FieldOperator:
+    return _function_operator(
+        thermo_metrics,
         outputs=("heat", "free_energy", "integration", "entropy"),
-        validate_inputs=require_keys(("spins", "clause_frustrations", "influence_matrix")),
-        run=_run,
+        name="solver.thermo_metrics",
     )
 
 
 def _best_tracker_operator() -> FieldOperator:
-    """B2 — update best_spins / best_unsatisfied when current is better.
-
-    Reads from ``prev_best_spins`` / ``prev_best_unsatisfied`` (carry-forward
-    keys set by the epoch driver) so the Composer does not confuse the
-    operator's *outputs* with its *inputs* and skip it entirely.
-    """
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        spins = ctx["spins"]
-        unsatisfied = int(ctx["unsatisfied"])
-        prev_best_unsatisfied = int(ctx["prev_best_unsatisfied"])
-        prev_best_spins = ctx["prev_best_spins"]
-        if unsatisfied < prev_best_unsatisfied:
-            return {"best_spins": list(spins), "best_unsatisfied": unsatisfied}
-        return {"best_spins": prev_best_spins, "best_unsatisfied": prev_best_unsatisfied}
-
-    return FieldOperator(
-        name="solver.best_tracker",
-        inputs=("spins", "unsatisfied", "prev_best_spins", "prev_best_unsatisfied"),
+    return _function_operator(
+        best_tracker,
         outputs=("best_spins", "best_unsatisfied"),
-        validate_inputs=require_keys(("spins", "unsatisfied", "prev_best_spins", "prev_best_unsatisfied")),
-        run=_run,
+        name="solver.best_tracker",
     )
 
 
 def _lock_assignment_operator() -> FieldOperator:
-    """B3 — produce lock_assignment (float ±1.0 list or None)."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        unsatisfied = int(ctx["unsatisfied"])
-        planted = ctx.get("planted_assignment")
-        lock: list[float] | None = None
-        if unsatisfied == 0 and planted is not None:
-            lock = [1.0 if v else -1.0 for v in planted]
-        return {"lock_assignment": lock}
-
-    return FieldOperator(
-        name="solver.lock_assignment",
-        inputs=("unsatisfied",),
-        outputs=("lock_assignment",),
-        validate_inputs=require_keys(("unsatisfied",)),
-        run=_run,
-    )
+    return _function_operator(lock_assignment, name="solver.lock_assignment")
 
 
 def _cooling_operator() -> FieldOperator:
-    """B4 — linear cooling schedule: 1 → 0 over the run."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        t = int(ctx["t"])
-        steps = int(ctx["steps"])
-        return {"cooling": 1.0 - (t / max(1, steps - 1))}
-
-    return FieldOperator(
-        name="solver.cooling",
-        inputs=("t", "steps"),
-        outputs=("cooling",),
-        validate_inputs=require_keys(("t", "steps")),
-        run=_run,
-    )
+    return _function_operator(cooling, name="solver.cooling")
 
 
 def _memory_scale_operator() -> FieldOperator:
-    """B5 — compute memory drive scale from control action."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        control = ctx["control_state"]
-        samples = ctx["samples"]
-        unsatisfied = int(ctx["unsatisfied"])
-        best_unsatisfied = int(ctx["best_unsatisfied"])
-        adaptive_gain = float(ctx.get("adaptive_gain", 0.0))
-        scale = sat_furnace._action_memory_scale(
-            control.action, samples, unsatisfied, best_unsatisfied, adaptive_gain
-        )
-        return {"memory_scale": scale}
-
-    return FieldOperator(
-        name="solver.memory_scale",
-        inputs=("control_state", "samples", "unsatisfied", "best_unsatisfied"),
-        outputs=("memory_scale",),
-        validate_inputs=require_keys(("control_state", "samples", "unsatisfied", "best_unsatisfied")),
-        run=_run,
-    )
+    return _function_operator(memory_scale, name="solver.memory_scale")
 
 
 def _fiber_update_operator() -> FieldOperator:
-    """B6 — update fiber bundle memory in-place and return the same object."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        memory = ctx["fiber_memory"]
-        sat_furnace._update_fiber_bundle_memory(
-            memory,
-            ctx["formula"],
-            ctx["spins"],
-            ctx["pressures"],
-            ctx["clause_frustrations"],
-            ctx["influence_matrix"],
-        )
-        return {"fiber_memory": memory}
-
-    return FieldOperator(
-        name="solver.fiber_update",
-        inputs=("fiber_memory", "formula", "spins", "pressures", "clause_frustrations", "influence_matrix"),
-        outputs=("fiber_memory",),
-        validate_inputs=require_keys(("fiber_memory", "formula", "spins", "pressures",
-                                      "clause_frustrations", "influence_matrix")),
-        run=_run,
-    )
+    return _function_operator(fiber_update, outputs=("fiber_memory",), name="solver.fiber_update")
 
 
 def _sample_append_operator() -> FieldOperator:
@@ -1180,12 +1080,44 @@ def _trial_metrics_row_operator() -> FieldOperator:
             + float(row["runner_mean_loop_score"])
             - float(row["runner_mean_escape_score"])
         )
+        row.update(_bc.puzzle_ecology_metrics(
+            formula=formula,
+            variables=int(ctx["variables"]),
+            random_best_unsatisfied=int(ctx["random_best_unsatisfied"]),
+            walksat_best_unsatisfied=int(ctx["walksat_best_unsatisfied"]),
+            furnace_best_unsatisfied=int(furnace_best_unsatisfied),
+            random_solved=bool(ctx["random_solved"]),
+            walksat_solved=bool(ctx["walksat_solved"]),
+            furnace_solved=bool(result.solved),
+        ))
+        genome = _bc.solver_composition_genome()
+        row.update(_bc.composition_genome_metrics(
+            genome=genome,
+            puzzle_border_score=float(row["puzzle_border_score"]),
+            puzzle_composition_pressure=float(row["puzzle_composition_pressure"]),
+            solved=bool(result.solved),
+            furnace_best_unsatisfied=int(furnace_best_unsatisfied),
+            walksat_best_unsatisfied=int(ctx["walksat_best_unsatisfied"]),
+        ))
+        row.update(_bc.gene_border_mutation_metrics(
+            genome=genome,
+            traces=result.operator_traces,
+            puzzle_border_score=float(row["puzzle_border_score"]),
+            puzzle_composition_pressure=float(row["puzzle_composition_pressure"]),
+            solved=bool(result.solved),
+            furnace_best_unsatisfied=int(furnace_best_unsatisfied),
+            walksat_best_unsatisfied=int(ctx["walksat_best_unsatisfied"]),
+        ))
         row.update(_bc.coupling_metrics(
             report.windows, spatial_samples, runners,
             window_size=window, step_size=step_size,
         ))
         row.update(_bc.choice_policy_metrics(report.windows, runners))
         row.update(_bc.operator_trace_metrics(result.operator_traces))
+        row.update(_bc.transition_motif_metrics(
+            result.operator_traces,
+            climate_metrics=row,
+        ))
         row.update(_excitable_trace_metrics(result.operator_traces, policy))
         return {"metrics_row": row}
 
