@@ -751,23 +751,6 @@ def solver_composition_genome() -> CompositionGenome:
     )
 
 
-def trial_composition_genome() -> CompositionGenome:
-    composer = sat_composer.build_trial_composer()
-    available = (
-        "kind", "seed", "formula", "planted_assignment", "variables", "steps", "rng",
-        "temperature", "learning_rate", "inertia", "noise", "adaptive", "policy",
-        "spike_threshold", "spike_slope", "memory_decay", "memory_drive", "window",
-        "step_size", "runner_quantile", "baseline_restarts", "random_solved",
-        "random_best_unsatisfied", "walksat_solved", "walksat_best_unsatisfied",
-        "walksat_flips",
-    )
-    return composition_genome_for_targets(
-        composer,
-        ("metrics_row", "furnace_result", "calorimeter_report"),
-        available,
-    )
-
-
 def composition_gene_role(
     name: str,
     inputs: Sequence[str],

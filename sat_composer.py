@@ -73,40 +73,9 @@ def _graph_runners_operator() -> FieldOperator:
     return _function_operator(graph_runners)
 
 
-def build_graph_composer() -> Composer:
-    return Composer(
-        operators=(
-            _formula_graph_operator(),
-            _formula_adjacency_operator(),
-            _spatial_samples_operator(),
-            _graph_runners_operator(),
-        )
-    )
-
-
-def run_graph_targets(targets: tuple[str, ...] | list[str], context: Mapping[str, object]) -> dict[str, object]:
-    graph_context = {"runner_quantile": 0.90, **dict(context)}
-    return build_graph_composer().run(targets, graph_context)
-
-
 # ---------------------------------------------------------------------------
 # Phase 2: SAT furnace step operators
 # ---------------------------------------------------------------------------
-
-def generate_formula(kind: str, variables: int, clauses: int, clause_size: int, rng) -> dict:
-    formula, planted = sat_furnace.generate_formula(
-        str(kind), int(variables), int(clauses), int(clause_size), rng
-    )
-    return {"formula": formula, "planted_assignment": planted}
-
-
-def validate_formula(formula: list, variables: int) -> list:
-    for clause in formula:
-        for var, _ in clause:
-            if var < 0 or var >= variables:
-                raise ValueError(f"variable index {var} out of range [0, {variables})")
-    return formula
-
 
 def clause_pressure(formula: list, spins: list, temperature: float) -> dict:
     pressures, clause_frustrations, unsatisfied = sat_furnace._clause_pressures(
@@ -185,24 +154,6 @@ def adaptive_control(
     )
 
 
-def memory_init(variables: int, formula: list, memory_decay: float = 0.92):
-    return sat_furnace._initialize_fiber_bundle_memory(
-        int(variables), len(formula), float(memory_decay)
-    )
-
-
-def _formula_generate_operator() -> FieldOperator:
-    return _function_operator(
-        generate_formula,
-        outputs=("formula", "planted_assignment"),
-        name="formula.generate",
-    )
-
-
-def _formula_validate_operator() -> FieldOperator:
-    return _function_operator(validate_formula, outputs=("validated_formula",), name="formula.validate")
-
-
 def _clause_pressure_operator() -> FieldOperator:
     return _function_operator(
         clause_pressure,
@@ -229,10 +180,6 @@ def _adaptive_strength_operator() -> FieldOperator:
 
 def _adaptive_control_operator() -> FieldOperator:
     return _function_operator(adaptive_control, outputs=("control_state",), name="solver.adaptive_control")
-
-
-def _memory_init_operator() -> FieldOperator:
-    return _function_operator(memory_init, outputs=("fiber_memory",), name="solver.memory_init")
 
 
 def bridge_bias(influence_matrix: list) -> list:
@@ -503,37 +450,11 @@ def _spin_update_operator() -> FieldOperator:
     )
 
 
-def _emit_sample_operator() -> FieldOperator:
-    """Wraps sat_furnace._spatial_frame_rows to produce spatial emission rows for one epoch."""
-    def _run(ctx: FieldContext) -> Mapping[str, object]:
-        rows = sat_furnace._spatial_frame_rows(
-            int(ctx["t"]),
-            ctx["formula"],
-            ctx["spins"],
-            ctx["clause_frustrations"],
-            ctx["influence_matrix"],
-            ctx["pressures"],
-            float(ctx["temperature"]),
-        )
-        return {"spatial_rows": rows}
-
-    return FieldOperator(
-        name="solver.emit_sample",
-        inputs=("t", "formula", "spins", "clause_frustrations", "influence_matrix", "pressures", "temperature"),
-        outputs=("spatial_rows",),
-        validate_inputs=require_keys(("t", "formula", "spins", "clause_frustrations",
-                                      "influence_matrix", "pressures", "temperature")),
-        run=_run,
-    )
-
-
 def build_solver_composer() -> Composer:
     """Returns a Composer registered with all furnace step operators."""
     bias_ops = _bias_operators()
     return Composer(
         operators=(
-            _formula_generate_operator(),
-            _formula_validate_operator(),
             _clause_pressure_operator(),
             _influence_lift_operator(),
             _adaptive_gate_operator(),
@@ -546,14 +467,12 @@ def build_solver_composer() -> Composer:
             _spike_gate_operator(),
             _mixed_drive_operator(),
             _spin_update_operator(),
-            _emit_sample_operator(),
             # Phase B operators
             _thermo_metrics_operator(),
             _best_tracker_operator(),
             _lock_assignment_operator(),
             _cooling_operator(),
             _memory_scale_operator(),
-            _fiber_update_operator(),
             _sample_append_operator(),
             _spatial_append_operator(),
             _trace_append_operator(),
@@ -620,25 +539,6 @@ def memory_scale(
     )
 
 
-def fiber_update(
-    fiber_memory,
-    formula: list,
-    spins: list,
-    pressures: list,
-    clause_frustrations: list,
-    influence_matrix: list,
-):
-    sat_furnace._update_fiber_bundle_memory(
-        fiber_memory,
-        formula,
-        spins,
-        pressures,
-        clause_frustrations,
-        influence_matrix,
-    )
-    return fiber_memory
-
-
 def _thermo_metrics_operator() -> FieldOperator:
     return _function_operator(
         thermo_metrics,
@@ -665,10 +565,6 @@ def _cooling_operator() -> FieldOperator:
 
 def _memory_scale_operator() -> FieldOperator:
     return _function_operator(memory_scale, name="solver.memory_scale")
-
-
-def _fiber_update_operator() -> FieldOperator:
-    return _function_operator(fiber_update, outputs=("fiber_memory",), name="solver.fiber_update")
 
 
 def _sample_append_operator() -> FieldOperator:
@@ -1217,145 +1113,3 @@ def build_trial_composer() -> Composer:
         )
     )
 
-
-# ---------------------------------------------------------------------------
-# Explain operators (Phase #4)
-# ---------------------------------------------------------------------------
-# Usage:
-#   ctx = {
-#       "composer": sat_composer.build_solver_composer(),
-#       "targets": ["furnace_result"],
-#       "available_keys": ("formula", "spins", "t"),   # optional
-#   }
-#   out = build_explain_composer().run(["explain_report"], ctx)
-#   print(out["explain_report"])
-# ---------------------------------------------------------------------------
-
-def _explain_plan_operator() -> FieldOperator:
-    """Runs Composer.plan(); outputs ordered operator names and missing inputs."""
-    from composer import CompositionPlan  # noqa: F401 (type hint only)
-
-    def _run(ctx: FieldContext) -> dict[str, object]:
-        composer: Composer = ctx["composer"]  # type: ignore[assignment]
-        targets: list[str] = list(ctx["targets"])  # type: ignore[arg-type]
-        available: tuple[str, ...] = tuple(ctx.get("available_keys", ()))  # type: ignore[arg-type]
-        plan = composer.plan(targets, available)
-        return {"plan_order": plan.order, "plan_missing": plan.missing}
-
-    return FieldOperator(
-        name="explain.plan",
-        inputs=("composer", "targets"),
-        outputs=("plan_order", "plan_missing"),
-        run=_run,
-    )
-
-
-def _explain_edges_operator() -> FieldOperator:
-    """Runs Composer.graph(); outputs dependency edges and operator list."""
-    def _run(ctx: FieldContext) -> dict[str, object]:
-        composer: Composer = ctx["composer"]  # type: ignore[assignment]
-        targets: list[str] = list(ctx["targets"])  # type: ignore[arg-type]
-        available: tuple[str, ...] = tuple(ctx.get("available_keys", ()))  # type: ignore[arg-type]
-        dep = composer.graph(targets, available)
-        return {"dep_edges": dep.edges, "dep_operators": dep.operators}
-
-    return FieldOperator(
-        name="explain.edges",
-        inputs=("composer", "targets"),
-        outputs=("dep_edges", "dep_operators"),
-        run=_run,
-    )
-
-
-def _explain_operator_detail_operator() -> FieldOperator:
-    """Emits per-operator detail dicts (inputs, outputs) for the planned order."""
-    def _run(ctx: FieldContext) -> dict[str, object]:
-        composer: Composer = ctx["composer"]  # type: ignore[assignment]
-        plan_order: tuple[str, ...] = ctx["plan_order"]  # type: ignore[assignment]
-        details = []
-        for name in plan_order:
-            op = composer._operators.get(name)
-            if op is None:
-                continue
-            details.append({
-                "name": op.name,
-                "inputs": list(op.inputs),
-                "outputs": list(op.outputs),
-            })
-        return {"operator_details": details}
-
-    return FieldOperator(
-        name="explain.operator_detail",
-        inputs=("composer", "plan_order"),
-        outputs=("operator_details",),
-        run=_run,
-    )
-
-
-def _explain_format_operator() -> FieldOperator:
-    """Formats plan_order, edges, and operator details into a readable report."""
-    def _run(ctx: FieldContext) -> dict[str, object]:
-        from composer import MissingInput  # noqa: F401 (isinstance check)
-        targets: list[str] = list(ctx["targets"])  # type: ignore[arg-type]
-        plan_order: tuple[str, ...] = ctx["plan_order"]  # type: ignore[assignment]
-        plan_missing: tuple[object, ...] = ctx["plan_missing"]  # type: ignore[assignment]
-        dep_edges: tuple[tuple[str, str], ...] = ctx["dep_edges"]  # type: ignore[assignment]
-        operator_details: list[dict[str, object]] = ctx["operator_details"]  # type: ignore[assignment]
-
-        lines: list[str] = []
-        lines.append(f"targets: {', '.join(targets)}")
-        lines.append("")
-
-        if plan_missing:
-            lines.append("missing inputs:")
-            for item in plan_missing:
-                lines.append(f"  {item.key}  (required by {', '.join(item.required_by)})")  # type: ignore[attr-defined]
-            lines.append("")
-
-        lines.append(f"execution order ({len(plan_order)} operators):")
-        for i, detail in enumerate(operator_details, 1):
-            ins = ", ".join(detail["inputs"])  # type: ignore[arg-type]
-            outs = ", ".join(detail["outputs"])  # type: ignore[arg-type]
-            lines.append(f"  {i:2d}. {detail['name']}")
-            lines.append(f"       in:  {ins or '—'}")
-            lines.append(f"       out: {outs or '—'}")
-
-        if dep_edges:
-            lines.append("")
-            lines.append("dependencies:")
-            for src, dst in dep_edges:
-                lines.append(f"  {src} → {dst}")
-
-        return {"explain_report": "\n".join(lines)}
-
-    return FieldOperator(
-        name="explain.format",
-        inputs=("targets", "plan_order", "plan_missing", "dep_edges", "operator_details"),
-        outputs=("explain_report",),
-        run=_run,
-    )
-
-
-def build_explain_composer() -> Composer:
-    """Returns a Composer that explains another Composer's execution plan.
-
-    Pass a ``composer`` (any Composer instance), ``targets`` (list of str),
-    and optionally ``available_keys`` (iterable of str already in context)
-    to the returned composer's run call::
-
-        ctx = {
-            "composer": build_solver_composer(),
-            "targets": ["furnace_result"],
-            "available_keys": ("formula", "variables", "steps"),
-        }
-        out = build_explain_composer().run(["explain_report"], ctx)
-        print(out["explain_report"])
-    """
-    return Composer(
-        operators=(
-            _explain_plan_operator(),
-            _explain_edges_operator(),
-            _explain_operator_detail_operator(),
-            _explain_format_operator(),
-        )
-    )
