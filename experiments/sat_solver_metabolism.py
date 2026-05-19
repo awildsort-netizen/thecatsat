@@ -15,10 +15,16 @@ through the tiny helpers in ``sat_metabolism.py`` to emit:
   - distance_delta_per_step
   - assignment_hamming_movement
   - unsat_clause_revisit_count
-  - operator_gene_entropy
-  - motif_reuse_count
+  - operator_gene_entropy (over ``L:<op>`` streamable gene tokens)
+  - motif_reuse_count (over ``L:<op>`` streamable gene tokens)
   - shortest_observed_prefix_to_improvement
   - distance_paid_per_incompatibility_resolved
+
+The "gene" record is built by adapting climate-active ``OperatorTrace``
+entries into streamable gene tokens via
+``sat_metabolism.operator_trace_gene_tokens`` and decoding them through
+``streamable_genes.stream``. Entropy and motif reuse then run over the
+real ``L:<op>`` token stream, not over bare operator names.
 
 Two climates are compared at the same seed/instance: ``baseline`` and
 ``excitable_fiber`` (the second is an already-implemented composer
@@ -40,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sat_composer
 import sat_furnace
 import sat_metabolism as sm
+import streamable_genes
 from sat_furnace import _EPOCH_TARGETS, _init_epoch_context
 
 
@@ -80,6 +87,7 @@ class MetabolismTrace:
     hamming_movements: list[int]
     distance_deltas: list[int]
     active_operators_per_step: list[list[str]]
+    gene_tokens: tuple[str, ...]
     gene_entropy: float
     motif_reuse: int
     revisit_count: int
@@ -164,7 +172,22 @@ def run_metabolism(
         sm.active_operators_at_step(result.operator_traces, t)
         for t in range(steps)
     ]
-    flat_ops = [op for step_ops in active_ops_per_step for op in step_ops]
+    # Build a real streamable gene-token sequence from the active
+    # OperatorTrace entries (climate already filtered inactive operators
+    # in _trace_append_operator). The token stream is the metabolism's
+    # gene record; metrics below run over the L: tokens, not over the
+    # naked operator names.
+    sorted_traces = sorted(
+        result.operator_traces, key=lambda tr: (int(tr.t), tr.operator)
+    )
+    gene_tokens = sm.operator_trace_gene_tokens(sorted_traces)
+    # Round-trip through the streamable_genes decoder so the experiment
+    # consumes the same vocabulary downstream consumers do.
+    gene_state = streamable_genes.stream(gene_tokens)
+    decoded_names = tuple(token.name for token in gene_state.emitted)
+    # Compute entropy/motif reuse over the L:<op> token forms so the
+    # vocabulary is the gene-stream vocabulary, not bare operator names.
+    literal_tokens = tuple(f"L:{name}" for name in decoded_names)
 
     return MetabolismTrace(
         climate=climate,
@@ -176,8 +199,9 @@ def run_metabolism(
         hamming_movements=hamming_movements,
         distance_deltas=distance_deltas,
         active_operators_per_step=active_ops_per_step,
-        gene_entropy=sm.operator_gene_entropy(flat_ops),
-        motif_reuse=sm.motif_reuse_count(flat_ops, motif_size=3),
+        gene_tokens=gene_tokens,
+        gene_entropy=sm.operator_gene_entropy(literal_tokens),
+        motif_reuse=sm.motif_reuse_count(literal_tokens, motif_size=3),
         revisit_count=sm.unsat_clause_revisit_count(
             [len(formula), *unsat_series]
         ),
@@ -198,8 +222,8 @@ def _fmt_opt(value, fmt: str = "{:.3f}") -> str:
 
 def print_step_table(trace: MetabolismTrace, total_clauses: int) -> None:
     print()
-    print(f"  step | unsat | d_unsat | hamming | active operators (gene proxy)")
-    print(f"  -----+-------+---------+---------+-------------------------------")
+    print(f"  step | unsat | d_unsat | hamming | active operators (L: gene tokens)")
+    print(f"  -----+-------+---------+---------+-----------------------------------")
     print(f"   init|{total_clauses:>6} | {'':>7} | {'':>7} | (initial assignment)")
     for i in range(len(trace.unsat_series)):
         ops = trace.active_operators_per_step[i]
@@ -220,9 +244,12 @@ def print_summary(trace: MetabolismTrace) -> None:
     print(f"  climate: {trace.climate!r}")
     print(f"    solved: {trace.solved}")
     print(f"    final unsat: {trace.unsat_series[-1] if trace.unsat_series else 'n/a'}")
-    print(f"    gene_entropy (bits over active operator stream): "
+    literal_count = sum(1 for tok in trace.gene_tokens if tok.startswith("L:"))
+    print(f"    gene_tokens (streamable): {len(trace.gene_tokens)} "
+          f"({literal_count} L: literals + terminator)")
+    print(f"    gene_entropy (bits over L: gene-token stream): "
           f"{trace.gene_entropy:.3f}")
-    print(f"    motif_reuse_count (len-3 operator motifs): "
+    print(f"    motif_reuse_count (len-3 L: motifs): "
           f"{trace.motif_reuse}")
     print(f"    unsat_clause_revisit_count: {trace.revisit_count}")
     print(f"    shortest_observed_prefix_to_improvement: "
@@ -296,9 +323,10 @@ def main() -> None:
 
     print()
     print("Notes")
-    print("  * 'gene' here is the *active operator name* at a step — a")
-    print("    proxy, not the streamable-gene token stream. The composer")
-    print("    plan does not yet expose per-step gene identity directly.")
+    print("  * 'gene' here is a real streamable gene-token stream: each")
+    print("    climate-active OperatorTrace is adapted into an L:<op>")
+    print("    literal and round-tripped through streamable_genes.stream.")
+    print("    Entropy and motif reuse run over the resulting L: tokens.")
     print("  * distance_paid_per_incompatibility_resolved = total Hamming")
     print("    movement / net unsat resolved. Lower = the climate paid less")
     print("    assignment-space distance per unit of incompatibility")

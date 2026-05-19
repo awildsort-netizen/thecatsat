@@ -124,6 +124,78 @@ class HelperTests(unittest.TestCase):
         )
 
 
+class OperatorTraceGeneTokenTests(unittest.TestCase):
+    """The ``L:`` token adapter sits between OperatorTrace and the gene stream.
+
+    Inactive traces must not emit literals (climate didn't license them),
+    active traces must, and the resulting stream must round-trip through
+    ``streamable_genes.stream`` so downstream metrics share one vocabulary.
+    """
+
+    class _FakeTrace:
+        def __init__(self, t: int, op: str, active: bool) -> None:
+            self.t = t
+            self.operator = op
+            self.active = active
+
+    def test_inactive_traces_emit_no_literal_tokens(self) -> None:
+        traces = [
+            self._FakeTrace(0, "alpha", False),
+            self._FakeTrace(1, "beta", False),
+        ]
+        tokens = sm.operator_trace_gene_tokens(traces)
+        # No literals, just the terminator.
+        self.assertEqual(tokens, ("E",))
+
+    def test_active_traces_emit_L_tokens(self) -> None:
+        traces = [
+            self._FakeTrace(0, "alpha", True),
+            self._FakeTrace(0, "beta", False),
+            self._FakeTrace(1, "gamma", True),
+        ]
+        self.assertEqual(
+            sm.operator_trace_gene_tokens(traces),
+            ("L:alpha", "L:gamma", "E"),
+        )
+
+    def test_tokens_consumable_by_streamable_genes(self) -> None:
+        import streamable_genes
+
+        traces = [
+            self._FakeTrace(0, "alpha", True),
+            self._FakeTrace(0, "beta", False),
+            self._FakeTrace(1, "gamma", True),
+            self._FakeTrace(2, "alpha", True),
+        ]
+        tokens = sm.operator_trace_gene_tokens(traces)
+        state = streamable_genes.stream(tokens)
+        self.assertTrue(state.ended)
+        self.assertEqual(
+            [token.name for token in state.emitted],
+            ["alpha", "gamma", "alpha"],
+        )
+        # composable_now collapses duplicates: motif reuse is reuse, not noise.
+        self.assertEqual(state.composable_now(), ("alpha", "gamma"))
+
+    def test_end_marker_can_be_suppressed(self) -> None:
+        traces = [self._FakeTrace(0, "alpha", True)]
+        self.assertEqual(
+            sm.operator_trace_gene_tokens(traces, end=False),
+            ("L:alpha",),
+        )
+
+    def test_entropy_and_motif_reuse_over_L_tokens(self) -> None:
+        # Two repeating active operators -> 1 bit of entropy, and the
+        # length-2 motif ("L:alpha","L:beta") reuses once after the first.
+        traces = [
+            self._FakeTrace(t, op, True)
+            for t, op in enumerate(["alpha", "beta", "alpha", "beta"])
+        ]
+        tokens = sm.operator_trace_gene_tokens(traces, end=False)
+        self.assertAlmostEqual(sm.operator_gene_entropy(tokens), 1.0)
+        self.assertEqual(sm.motif_reuse_count(tokens, motif_size=2), 1)
+
+
 class ConcentrationClimateActivationTests(unittest.TestCase):
     """OperatorTrace.active should follow the concentration climate.
 

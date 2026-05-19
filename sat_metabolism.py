@@ -132,3 +132,21 @@ def active_operators_at_step(
     attributes (typically ``sat_furnace.OperatorTrace``).
     """
     return [tr.operator for tr in traces if int(tr.t) == int(t) and bool(tr.active)]
+
+
+def operator_trace_gene_tokens(
+    traces: Iterable, *, end: bool = True
+) -> tuple[str, ...]:
+    """Convert an ``OperatorTrace`` stream into streamable gene tokens.
+
+    Only ``active`` traces emit a ``L:<operator>`` literal; inactive traces
+    are skipped so the token stream reflects the same operators the climate
+    actually licensed. Traces are visited in their input order — callers
+    typically pass them already sorted by ``t``. A terminating ``E`` is
+    appended when ``end=True`` so the result is directly consumable by
+    ``streamable_genes.stream``.
+    """
+    tokens: list[str] = [f"L:{tr.operator}" for tr in traces if bool(tr.active)]
+    if end:
+        tokens.append("E")
+    return tuple(tokens)
