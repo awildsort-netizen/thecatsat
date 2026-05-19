@@ -70,10 +70,6 @@ def formula_graph_to_adjacency(graph: FormulaGraph) -> Adjacency:
     return graph.to_adjacency()
 
 
-def formula_graph_to_csv_rows(graph: FormulaGraph) -> list[dict[str, int | str]]:
-    return graph.to_csv_rows()
-
-
 def spatial_rows_to_samples(spatial_rows: Sequence[dict[str, float | int | str]]):
     import sprite_detector
 

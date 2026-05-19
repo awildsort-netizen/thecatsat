@@ -7,7 +7,7 @@ import inspect
 import re
 from dataclasses import dataclass, fields, is_dataclass
 from types import ModuleType
-from typing import Any, Callable, Iterable, Mapping, get_type_hints
+from typing import Callable, Iterable, Mapping, get_type_hints
 
 FieldContext = dict[str, object]
 Validator = Callable[[Mapping[str, object]], None]
@@ -338,34 +338,3 @@ def require_keys(keys: Iterable[str]) -> Validator:
     return _validate
 
 
-def require_types(type_by_key: Mapping[str, type[Any] | tuple[type[Any], ...]]) -> Validator:
-    requirements = dict(type_by_key)
-
-    def _validate(values: Mapping[str, object]) -> None:
-        for key, expected in requirements.items():
-            if key not in values:
-                continue
-            if not isinstance(values[key], expected):
-                expected_name = _type_name(expected)
-                actual_name = type(values[key]).__name__
-                raise TypeError(
-                    f"key {key} expected type {expected_name}, got {actual_name}"
-                )
-
-    return _validate
-
-
-def compose_validators(*validators: Validator | None) -> Validator:
-    valid = tuple(validator for validator in validators if validator is not None)
-
-    def _validate(values: Mapping[str, object]) -> None:
-        for validator in valid:
-            validator(values)
-
-    return _validate
-
-
-def _type_name(expected: type[Any] | tuple[type[Any], ...]) -> str:
-    if isinstance(expected, tuple):
-        return " | ".join(sorted(item.__name__ for item in expected))
-    return expected.__name__
