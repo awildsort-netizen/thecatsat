@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sat_composer
 import sat_furnace
-from sat_furnace import _EPOCH_TARGETS, _STALE_EPOCH_KEYS, _init_epoch_context
+from sat_furnace import _EPOCH_TARGETS, _init_epoch_context
 
 
 def banner(title: str) -> None:
@@ -79,8 +79,38 @@ def experiment_plan_visibility() -> None:
     print("  outside the composer plan itself.")
 
 
+_SAT_RENAME_MAP = {
+    # Per-step state that becomes the next step's input under a different name.
+    "next_spins": "spins",
+    "next_velocity": "velocity",
+    "samples": "prev_samples",
+    "spatial_samples": "prev_spatial_samples",
+    "operator_traces": "prev_operator_traces",
+    "best_spins": "prev_best_spins",
+    "best_unsatisfied": "prev_best_unsatisfied",
+    "concentrations": "prev_concentrations",
+}
+
+# fiber_memory is in _EPOCH_TARGETS but no operator produces it — it is
+# initial state mutated in-place by downstream operators. ``preserve`` tells
+# ``iterate`` to keep it across the stale-key sweep.
+_SAT_PRESERVE = ("fiber_memory",)
+
+
+def _sat_before_step(ctx, index):
+    """Derive scalar previous-step metrics from the renamed prev_samples list."""
+    prev_samples = ctx.get("prev_samples") or []
+    if prev_samples:
+        ctx["previous_unsatisfied"] = prev_samples[-1].unsatisfied_clauses
+        ctx["previous_integration"] = prev_samples[-1].integration
+    else:
+        ctx["previous_unsatisfied"] = ctx.get("prev_best_unsatisfied", 0)
+        ctx["previous_integration"] = 0.0
+    return {}
+
+
 def experiment_run_furnace_is_a_driver() -> None:
-    banner("2. run_furnace is a thin time-shell around composer.run")
+    banner("2. run_furnace is a thin time-shell around composer.iterate")
     formula, planted, variables = small_planted_instance()
     rng_a = random.Random(11)
     rng_b = random.Random(11)
@@ -118,34 +148,26 @@ def experiment_run_furnace_is_a_driver() -> None:
         spike_threshold=0.35,
         spike_slope=8.0,
     )
-    for t in range(20):
-        ctx["t"] = t
-        ctx["prev_samples"] = ctx.get("samples", [])
-        ctx["prev_spatial_samples"] = ctx.get("spatial_samples", [])
-        ctx["prev_operator_traces"] = ctx.get("operator_traces", [])
-        ctx["prev_best_spins"] = ctx.get("best_spins", ctx["prev_best_spins"])
-        ctx["prev_best_unsatisfied"] = ctx.get(
-            "best_unsatisfied", ctx["prev_best_unsatisfied"]
-        )
-        ctx["prev_concentrations"] = ctx.get(
-            "concentrations", ctx["prev_concentrations"]
-        )
-        prev_samples = ctx["prev_samples"]
-        ctx["previous_unsatisfied"] = (
-            prev_samples[-1].unsatisfied_clauses
-            if prev_samples
-            else ctx["prev_best_unsatisfied"]
-        )
-        ctx["previous_integration"] = (
-            prev_samples[-1].integration if prev_samples else 0.0
-        )
-        for key in _STALE_EPOCH_KEYS:
-            ctx.pop(key, None)
-        out = composer.run(_EPOCH_TARGETS, ctx)
-        ctx.update(out)
-        ctx["spins"] = out["next_spins"]
-        ctx["velocity"] = out["next_velocity"]
-    final = composer.run(("final_assignment", "solved", "furnace_result"), ctx)
+    iteration = composer.iterate(
+        _EPOCH_TARGETS,
+        count=20,
+        initial_context=ctx,
+        rename_map=_SAT_RENAME_MAP,
+        preserve=_SAT_PRESERVE,
+        step_key="t",
+        before_step=_sat_before_step,
+        collect=("samples",),
+    )
+    # Restore renamed sources so the post-iteration composer.run reads the
+    # final per-step outputs (samples, best_spins, ...) rather than re-running
+    # the per-step operators on top of the carry-forward state.
+    final_ctx = dict(iteration.context)
+    for src, dst in _SAT_RENAME_MAP.items():
+        if dst in final_ctx:
+            final_ctx[src] = final_ctx[dst]
+    final = composer.run(
+        ("final_assignment", "solved", "furnace_result"), final_ctx,
+    )
     by_hand = final["furnace_result"]
     print(f"  by-hand:     solved={by_hand.solved} "
           f"unsatisfied={by_hand.samples[-1].unsatisfied_clauses if by_hand.samples else -1} "
@@ -158,12 +180,14 @@ def experiment_run_furnace_is_a_driver() -> None:
         and list(result.final_assignment) == list(by_hand.final_assignment)
     )
     print(f"  equivalence: {same}")
+    print(f"  iteration trace has {len(iteration.steps)} step snapshots.")
     print()
-    print("  Observation: run_furnace and the hand-rolled composer driver")
-    print("  agree on assignment + solved + unsatisfied. The driver is a")
-    print("  ~20-line ``for t in range(steps)`` loop. The 'solver' is the")
-    print("  composer plan; the loop is bookkeeping (prev_* carry-forward,")
-    print("  stale-key cleanup, t-stamp).")
+    print("  Observation: composer.iterate(_EPOCH_TARGETS, count=20, rename_map=...)")
+    print("  reproduces run_furnace exactly. The hand-rolled ``for t in range(steps)``")
+    print("  has collapsed into a single counted-cycle call. The cycle in the")
+    print("  per-epoch dependency graph (next_spins -> spins, samples ->")
+    print("  prev_samples, ...) is no longer a planner error — it is the rename")
+    print("  contract that makes 20 epochs a first-class request.")
 
 
 def experiment_what_resists_being_a_composer() -> None:
@@ -178,17 +202,18 @@ def experiment_what_resists_being_a_composer() -> None:
     print("    * _init_epoch_context: seeds initial dataclass state (memory")
     print("      fiber, control_state). Could become an init operator with")
     print("      explicit outputs, but it is run-once not per-step.")
-    print("    * the ``for t in range(steps)`` loop: time iteration with")
-    print("      prev_*  carry-forward + stale-key cleanup. This is the")
-    print("      composer's main blind spot — it has no native concept of")
-    print("      'iterate this plan N times under a renaming scheme.'")
+    print("    * the time loop: now expressible as composer.iterate with a")
+    print("      rename_map and a tiny before_step that derives scalar")
+    print("      previous_* metrics from prev_samples[-1]. Cycles in the")
+    print("      per-epoch graph (next_spins -> spins, samples ->")
+    print("      prev_samples) are the rename contract, not a planner error.")
     print("    * the final composer.run for ('final_assignment', ...): a")
     print("      second plan; already a composer call, just over a")
     print("      different target set.")
     print()
-    print("  Net: ~2 of the ~3 pieces are already composer-shaped. Only the")
-    print("  fixed-point/iteration shell resists. A small 'iterate(plan,")
-    print("  rename_map, steps)' meta-operator would close the gap.")
+    print("  Net: every per-step piece is composer-shaped. The remaining")
+    print("  refactor in run_furnace is mechanical — call composer.iterate")
+    print("  directly instead of hand-rolling the loop.")
 
 
 def main() -> None:

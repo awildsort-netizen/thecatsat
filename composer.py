@@ -63,6 +63,23 @@ class ProviderFit:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class IterationStep:
+    """Snapshot of the keys requested via ``collect`` after a single iteration."""
+
+    index: int
+    collected: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class IterationResult:
+    """Final context plus per-step trace produced by ``Composer.iterate``."""
+
+    context: Mapping[str, object]
+    steps: tuple[IterationStep, ...]
+    count: int
+
+
 class Composer:
     """Plans and executes registered operators to satisfy requested targets."""
 
@@ -160,6 +177,81 @@ class Composer:
                 context[output_key] = output_values[output_key]
 
         return {target: context[target] for target in dict.fromkeys(targets)}
+
+    def iterate(
+        self,
+        targets: Iterable[str],
+        count: int,
+        *,
+        initial_context: Mapping[str, object] | None = None,
+        rename_map: Mapping[str, str] | None = None,
+        preserve: Iterable[str] = (),
+        collect: Iterable[str] = (),
+        step_key: str | None = None,
+        before_step: Callable[[FieldContext, int], Mapping[str, object]] | None = None,
+    ) -> "IterationResult":
+        """Run ``targets`` ``count`` times, treating cycles as natural loops.
+
+        Per-step lifecycle:
+          1. If ``step_key`` is set, the step index is written to that key.
+          2. If ``before_step`` is provided, its returned mapping is merged in
+             (used for context derived from the prior step, e.g. summaries of
+             collected lists).
+          3. ``rename_map`` entries (``src -> dst``) copy each ``src`` from the
+             prior step to ``dst``.  After step 0 the source itself is then
+             considered stale and dropped (unless it appears in ``preserve``).
+          4. Stale per-step outputs are cleared: any key that was produced by
+             the previous iteration's ``composer.run(targets)`` and is not in
+             ``preserve``, not a rename destination, and not still being read
+             as a rename source.
+          5. ``composer.run(targets, ctx)`` executes the plan.
+          6. The keys named in ``collect`` are snapshotted into the step trace.
+
+        The result holds the full final context plus the per-step trace.  This
+        makes cycles in the dependency graph a *resource* — "give me N of this
+        type" — rather than a planner error.
+        """
+        if count < 0:
+            raise ValueError(f"iterate count must be >= 0, got {count}")
+        target_set = tuple(dict.fromkeys(targets))
+        preserve_set = frozenset(preserve)
+        collect_keys = tuple(dict.fromkeys(collect))
+        rename = dict(rename_map or {})
+        rename_sources = frozenset(rename.keys())
+        rename_destinations = frozenset(rename.values())
+
+        context: FieldContext = dict(initial_context or {})
+        steps: list[IterationStep] = []
+        produced_last_step: frozenset[str] = frozenset()
+
+        for index in range(count):
+            stale = (
+                produced_last_step
+                - preserve_set
+                - rename_destinations
+                - rename_sources
+            )
+            for key in stale:
+                context.pop(key, None)
+            if step_key is not None:
+                context[step_key] = index
+            if before_step is not None:
+                extra = before_step(context, index)
+                if extra:
+                    context.update(extra)
+            output = self.run(target_set, context)
+            context.update(output)
+            snapshot = {key: context[key] for key in collect_keys if key in context}
+            steps.append(IterationStep(index=index, collected=snapshot))
+            for src, dst in rename.items():
+                if src in context:
+                    context[dst] = context[src]
+            for src in rename_sources:
+                if src in context and src not in preserve_set and src not in rename_destinations:
+                    context.pop(src, None)
+            produced_last_step = frozenset(target_set) - rename_sources
+
+        return IterationResult(context=context, steps=tuple(steps), count=count)
 
     @staticmethod
     def _validate_operator_inputs(operator: FieldOperator, context: FieldContext) -> None:
