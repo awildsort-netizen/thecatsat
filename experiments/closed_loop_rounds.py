@@ -56,6 +56,7 @@ def show_rounds(rounds: tuple[RoundResult, ...], total: int) -> None:
     for i, r in enumerate(rounds):
         print(f"  round {i}: field={{{fmt_field(r.field_in)}}}")
         print(f"           dist : {fmt_dist(r.distribution, total)}")
+        print(f"           fixation_index={r.fixation_index:.3f}")
 
 
 def experiment_fixation_under_no_decay() -> None:

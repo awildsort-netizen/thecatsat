@@ -365,5 +365,57 @@ class TestRunRounds(unittest.TestCase):
         self.assertEqual(initial, snapshot)
 
 
+class TestFixationIndex(unittest.TestCase):
+    def test_zero_trials_round_reports_zero(self):
+        rng = random.Random(0)
+        rounds = run_rounds(1, 0, [("t", ("a", "b"))], {}, rng)
+        self.assertEqual(rounds[0].fixation_index, 0.0)
+
+    def test_uniform_field_yields_lower_fixation(self):
+        steps = [("t", ("a", "b", "c", "d"))]
+        rng = random.Random(2026)
+        rounds = run_rounds(1, 800, steps, {}, rng)
+        # Four equally-eligible signatures: each ~ 25%. Top must stay below
+        # a loose 0.45 ceiling — well clear of full lock-in.
+        self.assertLess(rounds[0].fixation_index, 0.45)
+
+    def test_concentrated_field_yields_higher_fixation(self):
+        steps = [("t", ("a", "b", "c", "d"))]
+        rng = random.Random(2026)
+        rounds = run_rounds(1, 800, steps, {"a": 100.0}, rng)
+        # One signature massively favored: fixation should be near-total.
+        self.assertGreater(rounds[0].fixation_index, 0.9)
+
+    def test_fixation_strictly_higher_under_concentration(self):
+        steps = [("t", ("a", "b", "c", "d"))]
+        flat = run_rounds(1, 800, steps, {}, random.Random(7))
+        warm = run_rounds(1, 800, steps, {"a": 100.0}, random.Random(7))
+        self.assertGreater(warm[0].fixation_index, flat[0].fixation_index)
+
+    def test_fixation_at_full_lock_in_when_one_signature_dominates(self):
+        # If only one path is realistically reachable, every trial picks it
+        # and the index goes to 1.0. Use a single-name eligible set so all
+        # 200 trials emit the same signature.
+        steps = [("t", ("only",))]
+        rounds = run_rounds(1, 200, steps, {}, random.Random(0))
+        self.assertEqual(rounds[-1].fixation_index, 1.0)
+
+    def test_fixation_index_is_deterministic_under_seed(self):
+        steps = [("t", ("a", "b", "c"))]
+        rounds_a = run_rounds(3, 200, steps, {"a": 1.1}, random.Random(123))
+        rounds_b = run_rounds(3, 200, steps, {"a": 1.1}, random.Random(123))
+        self.assertEqual(
+            [r.fixation_index for r in rounds_a],
+            [r.fixation_index for r in rounds_b],
+        )
+
+    def test_fixation_index_is_a_proportion(self):
+        steps = [("t", ("a", "b"))]
+        rounds = run_rounds(2, 100, steps, {}, random.Random(0))
+        for r in rounds:
+            self.assertGreaterEqual(r.fixation_index, 0.0)
+            self.assertLessEqual(r.fixation_index, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

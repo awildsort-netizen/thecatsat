@@ -156,6 +156,25 @@ class RoundResult:
     distribution: Counter
     trace: tuple[str, ...]
 
+    @property
+    def fixation_index(self) -> float:
+        """Share of trials taken by the most common path signature.
+
+        ``1.0`` means every trial picked the same path — full lock-in.
+        ``1/k`` with ``k`` equally-popular signatures means uniform spread.
+        Empty rounds (zero trials) report ``0.0``.
+
+        This is intentionally the distribution view, not the field view:
+        what the loop *did* this round, not what it was *biased toward*.
+        Fixation rising across rounds is the signature of the city waking
+        only one neighborhood; staying flat is healthy ecology.
+        """
+
+        total = self.distribution.total()
+        if total <= 0:
+            return 0.0
+        return max(self.distribution.values()) / total
+
 
 def run_rounds(
     n_rounds: int,
