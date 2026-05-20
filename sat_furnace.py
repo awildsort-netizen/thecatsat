@@ -422,11 +422,6 @@ def _adaptive_activation_state(samples: Sequence[FurnaceSample], unsatisfied: in
     return False, "inactive_progressing"
 
 
-def _adaptive_should_activate(samples: Sequence[FurnaceSample], unsatisfied: int, best_unsatisfied: int) -> bool:
-    active, _ = _adaptive_activation_state(samples, unsatisfied, best_unsatisfied)
-    return active
-
-
 def _trace_operator(
     traces: list[OperatorTrace],
     t: int,

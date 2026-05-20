@@ -33,7 +33,7 @@ import tempfile
 import time
 from typing import Iterable, Sequence
 
-from composer import Composer, FieldOperator
+from composer import FieldOperator
 from sat_benchmarks import SolveResult
 
 

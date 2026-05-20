@@ -34,7 +34,6 @@ from typing import Any, Mapping
 
 from composer import Composer, FieldOperator
 import sat_composer
-import sat_furnace
 import sat_metabolism as sm
 from sat_furnace import _EPOCH_TARGETS, _init_epoch_context, clause_satisfied
 

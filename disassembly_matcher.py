@@ -40,7 +40,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping
 
 from bytecode_genes import (
     CodeBoundary,
