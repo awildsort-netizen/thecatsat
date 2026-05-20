@@ -17,8 +17,12 @@ incompatibility. So ``SolveResult`` keeps a small required surface
 the geodesic accounting (``distance_paid_per_resolved`` and friends)
 only when it makes sense. Brute / DPLL leave it empty.
 
-Dependency-free: no external SAT solver is invoked. A MiniSAT row would
-be a natural addition — and would slot into the same composer.
+Dependency-free by default. An optional external-solver row
+(CaDiCaL/MiniSat/Kissat/Glucose/PicoSAT) can be added by passing
+``include_external=True`` to :func:`build_sat_benchmark_composer`; if no
+supported binary is on PATH the external operator still returns a
+``SolveResult`` (with ``work_metric='unavailable'``) so the harness
+stays runnable everywhere.
 """
 
 from __future__ import annotations
@@ -327,11 +331,24 @@ def _furnace_op() -> FieldOperator:
     )
 
 
-def build_sat_benchmark_composer() -> Composer:
+def build_sat_benchmark_composer(*, include_external: bool = False,
+                                 external_timeout_s: float = 30.0) -> Composer:
     """Composer that exposes brute / DPLL / furnace as shared operators.
 
-    All three operators read ``(formula, variables)`` from the context;
+    All operators read ``(formula, variables)`` from the context;
     the furnace also reads optional ``furnace_steps`` and ``furnace_seed``.
     Targets: ``brute_result``, ``dpll_result``, ``furnace_benchmark_result``.
+
+    When ``include_external=True`` an additional ``external_solve``
+    operator is registered, producing ``external_result``. The operator
+    auto-discovers a supported solver binary on PATH; if none is found
+    it returns a ``SolveResult`` with ``work_metric='unavailable'``, so
+    enabling the row never makes the harness fail on a fresh machine.
     """
-    return Composer([_brute_op(), _dpll_op(), _furnace_op()])
+    ops = [_brute_op(), _dpll_op(), _furnace_op()]
+    if include_external:
+        # Imported lazily so sat_benchmarks stays usable without the
+        # external_sat module being touched at import time.
+        from external_sat import external_solver_op
+        ops.append(external_solver_op(timeout_s=external_timeout_s))
+    return Composer(ops)

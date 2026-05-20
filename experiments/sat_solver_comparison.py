@@ -22,6 +22,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sat_furnace
+from external_sat import discover_solver
 from sat_benchmarks import build_sat_benchmark_composer
 
 
@@ -40,16 +41,20 @@ def _fmt_opt(value, fmt: str = "{:.3f}") -> str:
 
 
 def run_one_instance(*, label: str, seed: int, variables: int, clauses: int,
-                     furnace_steps: int, furnace_seed: int) -> None:
+                     furnace_steps: int, furnace_seed: int,
+                     include_external: bool) -> None:
     print()
     print("=" * 78)
     print(f"INSTANCE: {label}  (variables={variables} clauses={clauses}  "
           f"planted-SAT seed={seed})")
     print("=" * 78)
     formula, _ = planted_instance(seed, variables, clauses)
-    composer = build_sat_benchmark_composer()
+    composer = build_sat_benchmark_composer(include_external=include_external)
+    targets = ["brute_result", "dpll_result", "furnace_benchmark_result"]
+    if include_external:
+        targets.append("external_result")
     out = composer.run(
-        ("brute_result", "dpll_result", "furnace_benchmark_result"),
+        tuple(targets),
         {
             "formula": formula,
             "variables": variables,
@@ -57,18 +62,19 @@ def run_one_instance(*, label: str, seed: int, variables: int, clauses: int,
             "furnace_seed": furnace_seed,
         },
     )
-    brute = out["brute_result"]
-    dpll = out["dpll_result"]
-    furnace = out["furnace_benchmark_result"]
+    rows = [out["brute_result"], out["dpll_result"], out["furnace_benchmark_result"]]
+    if include_external:
+        rows.append(out["external_result"])
 
-    print(f"  {'solver':<14} {'solved':>6} {'time_s':>9} "
+    print(f"  {'solver':<22} {'solved':>6} {'time_s':>9} "
           f"{'work':>9} {'final_unsat':>11}  work_metric")
-    print(f"  {'-'*14} {'-'*6} {'-'*9} {'-'*9} {'-'*11}  {'-'*30}")
-    for r in (brute, dpll, furnace):
-        print(f"  {r.solver_name:<14} {str(r.solved):>6} "
+    print(f"  {'-'*22} {'-'*6} {'-'*9} {'-'*9} {'-'*11}  {'-'*30}")
+    for r in rows:
+        print(f"  {r.solver_name:<22} {str(r.solved):>6} "
               f"{r.wall_time_s:>9.4f} "
               f"{r.work_units:>9} "
               f"{r.final_unsatisfied:>11}  {r.work_metric}")
+    furnace = out["furnace_benchmark_result"]
 
     if furnace.metabolism:
         print()
@@ -81,7 +87,19 @@ def run_one_instance(*, label: str, seed: int, variables: int, clauses: int,
 def main() -> None:
     print("Native composer/furnace solver vs simple baselines")
     print("(brute-force is honest dependency-free; DPLL is recursive unit-prop)")
-    print("All three solvers run as operators on the benchmark composer.")
+    print("All solvers run as operators on the benchmark composer.")
+    print()
+
+    external_binary = discover_solver()
+    if external_binary:
+        print(f"External SAT solver discovered: {external_binary}")
+        print("Including external_solve operator in the benchmark.")
+        include_external = True
+    else:
+        print("External SAT solver: not available (no cadical/minisat/kissat/"
+              "glucose/picosat on PATH).")
+        print("Skipping external_solve row. Install one of those binaries to enable it.")
+        include_external = False
     print()
 
     cases = [
@@ -98,6 +116,7 @@ def main() -> None:
             clauses=clauses,
             furnace_steps=fs,
             furnace_seed=fseed,
+            include_external=include_external,
         )
 
     print()
@@ -111,9 +130,13 @@ def main() -> None:
     print("    planted assignment (planted_assignment=None). On unsat-by-bad-")
     print("    luck the furnace can leave final_unsatisfied > 0 — that is the")
     print("    distance still owed, not a wrong answer to a yes/no.")
-    print("  * No external SAT solver is invoked — we deliberately avoid heavy")
-    print("    deps. A MiniSAT/CaDiCaL row would slot into the same composer")
-    print("    as another operator with the same SolveResult shape.")
+    print("  * The external_solve row (CaDiCaL/MiniSat/Kissat/Glucose/PicoSAT) is")
+    print("    opt-in: include_external=True. With no supported binary on PATH it")
+    print("    still returns a SolveResult with work_metric='unavailable' so the")
+    print("    rest of the harness keeps working.")
+    print("    Install hints:")
+    print("      Debian/Ubuntu: sudo apt-get install minisat   (or: cadical / kissat)")
+    print("      macOS (brew):  brew install minisat            (or: cadical)")
     print()
     print("done.")
 
