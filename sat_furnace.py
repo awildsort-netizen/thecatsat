@@ -142,20 +142,6 @@ _EPOCH_TARGETS = (
     "samples", "spatial_samples", "operator_traces",
 )
 
-_STALE_EPOCH_KEYS = frozenset({
-    "pressures", "clause_frustrations", "unsatisfied", "influence_matrix",
-    "heat", "free_energy", "integration", "entropy",
-    "best_spins", "best_unsatisfied",
-    "samples", "spatial_samples", "operator_traces",
-    "lock_assignment", "cooling",
-    "adaptive_active", "adaptive_reason", "adaptive_gain", "control_state",
-    "memory_scale", "bridge_bias", "_loop_escape_bias", "memory_bias",
-    "operator_effects", "concentrations", "excitatory_field", "inhibitory_field",
-    "local_field", "field_strength", "spike_strength", "mixed_drive",
-    "next_spins", "next_velocity", "drive_values",
-})
-
-
 def _init_epoch_context(
     *,
     formula: CNF,
@@ -209,6 +195,33 @@ def _init_epoch_context(
     }
 
 
+_EPOCH_RENAME_MAP = {
+    "next_spins": "spins",
+    "next_velocity": "velocity",
+    "samples": "prev_samples",
+    "spatial_samples": "prev_spatial_samples",
+    "operator_traces": "prev_operator_traces",
+    "best_spins": "prev_best_spins",
+    "best_unsatisfied": "prev_best_unsatisfied",
+    "concentrations": "prev_concentrations",
+}
+
+
+def _carry_previous_scalars(ctx, _index):
+    """Derive scalar accumulators (previous_unsatisfied/integration) from the
+    just-renamed ``prev_samples`` list, before the plan runs."""
+    prev_samples = ctx.get("prev_samples") or []
+    if prev_samples:
+        return {
+            "previous_unsatisfied": prev_samples[-1].unsatisfied_clauses,
+            "previous_integration": prev_samples[-1].integration,
+        }
+    return {
+        "previous_unsatisfied": ctx["prev_best_unsatisfied"],
+        "previous_integration": 0.0,
+    }
+
+
 def run_furnace(
     formula: CNF,
     variables: int,
@@ -247,33 +260,27 @@ def run_furnace(
         spike_slope=spike_slope,
     )
 
-    for t in range(steps):
-        ctx["t"] = t
-        # Carry-forward prev_* keys consumed by accumulator operators.
-        ctx["prev_samples"] = ctx.get("samples", [])
-        ctx["prev_spatial_samples"] = ctx.get("spatial_samples", [])
-        ctx["prev_operator_traces"] = ctx.get("operator_traces", [])
-        ctx["prev_best_spins"] = ctx.get("best_spins", ctx["prev_best_spins"])
-        ctx["prev_best_unsatisfied"] = ctx.get("best_unsatisfied", ctx["prev_best_unsatisfied"])
-        ctx["prev_concentrations"] = ctx.get("concentrations", ctx["prev_concentrations"])
-        ctx["previous_unsatisfied"] = (
-            ctx["prev_samples"][-1].unsatisfied_clauses  # type: ignore[index]
-            if ctx["prev_samples"]
-            else ctx["prev_best_unsatisfied"]
-        )
-        ctx["previous_integration"] = (
-            ctx["prev_samples"][-1].integration  # type: ignore[index]
-            if ctx["prev_samples"]
-            else 0.0
-        )
-        for key in _STALE_EPOCH_KEYS:
-            ctx.pop(key, None)
-        out = composer.run(_EPOCH_TARGETS, ctx)
-        ctx.update(out)
-        ctx["spins"] = out["next_spins"]
-        ctx["velocity"] = out["next_velocity"]
+    iteration = composer.iterate(
+        _EPOCH_TARGETS,
+        count=steps,
+        initial_context=ctx,
+        rename_map=_EPOCH_RENAME_MAP,
+        preserve=("fiber_memory",),
+        step_key="t",
+        before_step=_carry_previous_scalars,
+    )
 
-    out = composer.run(("final_assignment", "solved", "furnace_result"), ctx)
+    final_ctx = dict(iteration.context)
+    # The rename map drops the per-step source keys (e.g. ``samples``) once
+    # they have been carried over to their ``prev_*`` form for the next
+    # iteration. Re-surface them for the closing plan, which reads the last
+    # iteration's values directly.
+    for src, dst in _EPOCH_RENAME_MAP.items():
+        if dst in final_ctx:
+            final_ctx[src] = final_ctx[dst]
+    out = composer.run(
+        ("final_assignment", "solved", "furnace_result"), final_ctx
+    )
     return out["furnace_result"]  # type: ignore[return-value]
 
 
