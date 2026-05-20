@@ -429,9 +429,22 @@ class BenchmarkMetricTests(unittest.TestCase):
         self.assertEqual(metrics["mutation_action"], "retune_gate")
 
     def test_mutation_controls_table_covers_every_handler(self) -> None:
-        # Every registered tag plus an unrecognized one (default branch) must
+        # Every reflected tag plus an unrecognized one (default branch) must
         # produce enabled controls with clamped scalar overrides.
-        tags = list(benchmark_calorimeter._MUTATION_HANDLERS.keys()) + ["unknown_tag"]
+        discovered = benchmark_calorimeter._discover_mutation_tags()
+        expected = {
+            "retune_gate",
+            "lower_activation_border",
+            "mutate_memory_decay",
+            "reweight_transform",
+            "inhibit_or_rescale",
+            "instrument_or_expose",
+            "increase_resolution",
+            "recombine_provider",
+            "tighten_constraint",
+        }
+        self.assertEqual(set(discovered), expected)
+        tags = discovered + ["unknown_tag"]
         for tag in tags:
             with self.subTest(tag=tag):
                 candidate = benchmark_calorimeter.GeneMutationCandidate(

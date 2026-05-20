@@ -35,7 +35,12 @@ from typing import Any, Mapping
 from composer import Composer, FieldOperator
 import sat_composer
 import sat_metabolism as sm
-from sat_furnace import _EPOCH_TARGETS, _init_epoch_context, clause_satisfied
+from sat_furnace import (
+    _EPOCH_RENAME_MAP,
+    _EPOCH_TARGETS,
+    _init_epoch_context,
+    clause_satisfied,
+)
 
 
 @dataclass(frozen=True)
@@ -175,17 +180,6 @@ def dpll_solve(formula, variables: int) -> SolveResult:
 # ---------------------------------------------------------------------------
 # Furnace via Composer.iterate.
 # ---------------------------------------------------------------------------
-_SAT_RENAME_MAP = {
-    "next_spins": "spins",
-    "next_velocity": "velocity",
-    "samples": "prev_samples",
-    "spatial_samples": "prev_spatial_samples",
-    "operator_traces": "prev_operator_traces",
-    "best_spins": "prev_best_spins",
-    "best_unsatisfied": "prev_best_unsatisfied",
-    "concentrations": "prev_concentrations",
-}
-_SAT_PRESERVE = ("fiber_memory",)
 
 
 def _sat_before_step(ctx, _index):
@@ -232,14 +226,14 @@ def furnace_solve_via_iterate(
         _EPOCH_TARGETS,
         count=steps,
         initial_context=ctx,
-        rename_map=_SAT_RENAME_MAP,
-        preserve=_SAT_PRESERVE,
+        rename_map=_EPOCH_RENAME_MAP,
+        preserve=("fiber_memory",),
         step_key="t",
         before_step=_sat_before_step,
         collect=("next_spins",),
     )
     final_ctx = dict(iteration.context)
-    for src, dst in _SAT_RENAME_MAP.items():
+    for src, dst in _EPOCH_RENAME_MAP.items():
         if dst in final_ctx:
             final_ctx[src] = final_ctx[dst]
     final = composer.run(

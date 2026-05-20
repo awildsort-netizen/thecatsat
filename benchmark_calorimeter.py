@@ -909,17 +909,18 @@ def _mutation_default(state: dict, strength: float) -> None:
     state["spike_threshold"] = max(0.15, state["spike_threshold"] - 0.05 * strength)
 
 
-_MUTATION_HANDLERS: dict[str, Callable[[dict, float], None]] = {
-    "retune_gate": _mutation_retune_gate,
-    "lower_activation_border": _mutation_lower_activation_border,
-    "mutate_memory_decay": _mutation_mutate_memory_decay,
-    "reweight_transform": _mutation_reweight_transform,
-    "inhibit_or_rescale": _mutation_inhibit_or_rescale,
-    "instrument_or_expose": _mutation_instrument_or_expose,
-    "increase_resolution": _mutation_increase_resolution,
-    "recombine_provider": _mutation_recombine_provider,
-    "tighten_constraint": _mutation_tighten_constraint,
-}
+def _lookup_mutation(tag: str) -> Callable[[dict, float], None]:
+    return globals().get(f"_mutation_{tag}", _mutation_default)
+
+
+def _discover_mutation_tags() -> list[str]:
+    prefix = "_mutation_"
+    return sorted(
+        name[len(prefix):]
+        for name in globals()
+        if name.startswith(prefix) and name != "_mutation_default"
+        and callable(globals()[name])
+    )
 
 
 def mutation_controls_from_candidate(
@@ -961,8 +962,7 @@ def mutation_controls_from_candidate(
         "noise_delta": 0.0,
     }
 
-    handler = _MUTATION_HANDLERS.get(candidate.mutation, _mutation_default)
-    handler(state, strength)
+    _lookup_mutation(candidate.mutation)(state, strength)
 
     return MutationControls(
         enabled=True,

@@ -22,7 +22,7 @@ from composer import (
 
 EXCITABLE_POLICY = "excitable_fiber"
 CURRICULUM_SEED_POLICY = sat_curriculum.CURRICULUM_SEED_POLICY
-EFFECT_BASIS = ("pressure", "bridge", "loop_escape", "memory")
+EFFECT_BASIS = sat_curriculum.EFFECT_BASIS
 
 
 def formula_graph(formula: list) -> sat_field.FormulaGraph:

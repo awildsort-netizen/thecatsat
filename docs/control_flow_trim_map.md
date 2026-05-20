@@ -256,3 +256,105 @@ Not implemented in this pass — recorded for the next trim:
 This is the typed-border counterpart to the orchestration heuristic
 above: kernels compute, boundaries validate, and the body in between
 should be free of either job.
+
+## Tables / constants
+
+A complementary sweep to the control-flow trim: explicit module-level
+tables (registries, rename maps, constant tuples) are often metadata
+weeds when the information they hold is already implied by function
+names, dataclass fields, or another module's authoritative copy.
+
+### Done in this pass (`computer/reflected-mutation-handlers`)
+
+**`benchmark_calorimeter._MUTATION_HANDLERS`** — removed.
+
+The table mapped a mutation tag string to a handler function:
+`"retune_gate": _mutation_retune_gate, ...`. But the handler function
+*already* encoded the tag in its name (`_mutation_<tag>`). The mapping
+duplicated information that the function name already carried. Replaced
+with a tiny pair:
+
+```python
+def _lookup_mutation(tag):
+    return globals().get(f"_mutation_{tag}", _mutation_default)
+
+def _discover_mutation_tags():
+    return sorted(name[len("_mutation_"):]
+                  for name in globals()
+                  if name.startswith("_mutation_") and name != "_mutation_default"
+                  and callable(globals()[name]))
+```
+
+Test pinning: `test_mutation_controls_table_covers_every_handler` now
+asserts the discovered set equals the known nine tags, and
+`test_mutation_controls_specific_deltas_match_legacy_chain` keeps the
+arithmetic pinned. New handlers Just Work: drop a `_mutation_<tag>`
+function in and it is auto-discovered.
+
+**`sat_benchmarks._SAT_RENAME_MAP` + `_SAT_PRESERVE`** — removed.
+
+Literal byte-for-byte duplicate of `sat_furnace._EPOCH_RENAME_MAP` and
+its `preserve=("fiber_memory",)`. `sat_benchmarks` already imports from
+`sat_furnace`; the import list was extended and the local copies deleted.
+
+**`sat_composer.EFFECT_BASIS`** — replaced with re-export.
+
+`("pressure", "bridge", "loop_escape", "memory")` was defined identically
+in both `sat_composer.py` and `sat_curriculum.py`. `sat_composer` already
+imports `sat_curriculum`, so the composer copy is now
+`EFFECT_BASIS = sat_curriculum.EFFECT_BASIS`. Tests already used the
+curriculum copy as the source of truth.
+
+### Kept — domain / protocol / safety constants
+
+- `external_sat.SUPPORTED_BINARIES` — names of external SAT solvers
+  (`cadical`, `kissat`, `glucose`, `minisat`, `picosat`). Stable
+  external-protocol knowledge; their CLI flags and output parsers live
+  in this module.
+- `benchmark_calorimeter.KINDS` (`"sat", "unsat", "hard_sat"`) and
+  `DEFAULT_TRACE_CHECKPOINTS` — benchmark experimental parameters.
+- `benchmark_calorimeter.MOTIF_PRESSURE_EFFECTS`, `MOTIF_HINT_RULES`,
+  `MOTIF_ROLE_RULES`, `MOTIF_ROLE_EFFECTS`,
+  `MOTIF_ROLE_EFFECT_BY_ROLE`, `CLIMATE_NEED_RULES`,
+  `MOTIF_NEED_RULES` — declarative domain rules (entropy thresholds,
+  motif precedences, climate-to-need mappings). These tables *are* the
+  domain model, not metadata about it.
+- `sat_furnace._EPOCH_TARGETS`, `_EPOCH_RENAME_MAP` — the composer plan
+  for one furnace epoch. The plan keys are the contract; not weeds.
+- `sat_furnace.EPSILON`, `sprite_detector.EPSILON`,
+  `spectral_calorimeter.EPSILON` — numerical safety bounds.
+- `sat_composer.EXCITABLE_POLICY`,
+  `sat_curriculum.CURRICULUM_SEED_POLICY`,
+  `sat_curriculum.SEEDS` — stable policy identifiers and seed catalogue.
+- `attention_policies.POLICIES` — see "risky candidate" below.
+
+### Candidates (not done)
+
+1. **`attention_policies.POLICIES`** — same pattern as
+   `_MUTATION_HANDLERS`: a dict from policy name to handler function,
+   where the function name already equals the policy name. Reflection
+   would work mechanically. *Risk:* `POLICIES` is a public symbol
+   imported by tests as a registry; turning it into a function changes
+   the contract. Worth doing alongside any other change that touches
+   the policy resolve path.
+2. **Experiment-folder duplicates of `_SAT_RENAME_MAP` and
+   `_SAT_PRESERVE`** (`experiments/sat_solver_metabolism.py`,
+   `experiments/sat_as_composer.py`). Per the project principle "Do
+   not remove docs or experiments just because they are tables; they
+   often preserve evidence", these are intentionally left as standalone
+   snapshots of the experimental scaffolding at the time they were
+   written.
+3. **`sat_furnace._EPOCH_RENAME_MAP` closing remap loop** — the loop at
+   `sat_furnace.py:278` and `sat_benchmarks.py:236` reuses the rename
+   map to undo the rename for the closing plan. A `final_targets`
+   parameter on `composer.iterate` (mentioned in the earlier doc
+   section) would let both call sites drop the loop.
+
+### Heuristic
+
+> If a table maps `X → f_X` where the function or dataclass name
+> already encodes `X`, the table is metadata weeds. Discover by
+> reflection (module globals + naming convention) or by iterating the
+> set of dataclass instances. Domain rules expressed as dataclass
+> tuples are not weeds — they encode constraints that are not
+> recoverable from any single name.
