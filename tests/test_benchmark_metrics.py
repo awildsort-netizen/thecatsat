@@ -428,6 +428,67 @@ class BenchmarkMetricTests(unittest.TestCase):
         self.assertEqual(metrics["mutation_source_gene"], "solver.adaptive_gate")
         self.assertEqual(metrics["mutation_action"], "retune_gate")
 
+    def test_mutation_controls_table_covers_every_handler(self) -> None:
+        # Every registered tag plus an unrecognized one (default branch) must
+        # produce enabled controls with clamped scalar overrides.
+        tags = list(benchmark_calorimeter._MUTATION_HANDLERS.keys()) + ["unknown_tag"]
+        for tag in tags:
+            with self.subTest(tag=tag):
+                candidate = benchmark_calorimeter.GeneMutationCandidate(
+                    gene="solver.example",
+                    role="control",
+                    mutation=tag,
+                    score=0.5,
+                    reason="cover",
+                )
+                controls = benchmark_calorimeter.mutation_controls_from_candidate(
+                    candidate,
+                    adaptive=False,
+                    policy="baseline",
+                    spike_threshold=0.35,
+                    spike_slope=8.0,
+                    memory_decay=0.92,
+                    memory_drive=0.12,
+                )
+                self.assertTrue(controls.enabled)
+                self.assertEqual(controls.mutation, tag)
+                self.assertEqual(controls.source_gene, "solver.example")
+                self.assertGreaterEqual(controls.learning_rate_scale, 0.70)
+                self.assertLessEqual(controls.learning_rate_scale, 1.25)
+                self.assertGreaterEqual(controls.inertia_delta, -0.08)
+                self.assertLessEqual(controls.inertia_delta, 0.04)
+                self.assertGreaterEqual(controls.noise_delta, -0.008)
+                self.assertLessEqual(controls.noise_delta, 0.010)
+
+    def test_mutation_controls_specific_deltas_match_legacy_chain(self) -> None:
+        # Pin a few non-default-branch outputs so future refactors can't drift.
+        def make(tag: str, score: float = 0.6) -> benchmark_calorimeter.MutationControls:
+            return benchmark_calorimeter.mutation_controls_from_candidate(
+                benchmark_calorimeter.GeneMutationCandidate(
+                    gene="g", role="control", mutation=tag, score=score, reason=""
+                ),
+                adaptive=False,
+                policy="baseline",
+                spike_threshold=0.35,
+                spike_slope=8.0,
+                memory_decay=0.92,
+                memory_drive=0.12,
+            )
+
+        recombine = make("recombine_provider")
+        self.assertEqual(recombine.policy, "curriculum_seeds")
+        self.assertAlmostEqual(recombine.spike_threshold, max(0.16, 0.35 - 0.05 * 0.6))
+
+        inhibit = make("inhibit_or_rescale")
+        self.assertAlmostEqual(inhibit.learning_rate_scale, 1.0 - 0.18 * 0.6)
+        self.assertAlmostEqual(inhibit.inertia_delta, -0.03 * 0.6)
+        self.assertAlmostEqual(inhibit.noise_delta, -0.003 * 0.6)
+
+        memory_decay = make("mutate_memory_decay")
+        self.assertTrue(memory_decay.adaptive)
+        self.assertAlmostEqual(memory_decay.memory_decay, max(0.72, 0.92 - 0.10 * 0.6))
+        self.assertAlmostEqual(memory_decay.memory_drive, min(0.28, 0.12 + 0.08 * 0.6))
+
     def test_mutant_replay_can_be_disabled(self) -> None:
         controls = benchmark_calorimeter.MutationControls(
             enabled=False,

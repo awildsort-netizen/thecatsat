@@ -10,7 +10,7 @@ import random
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import sat_composer
 import sat_furnace
@@ -846,6 +846,82 @@ def composition_genome_metrics(
     }
 
 
+def _prefer_policy(state: dict, fallback: str) -> None:
+    if state["policy"] == "baseline":
+        state["policy"] = fallback
+
+
+def _mutation_retune_gate(state: dict, strength: float) -> None:
+    state["adaptive"] = True
+    _prefer_policy(state, sat_composer.CURRICULUM_SEED_POLICY)
+    state["spike_threshold"] = max(0.12, state["spike_threshold"] - 0.10 * strength)
+    state["spike_slope"] = min(14.0, state["spike_slope"] + 2.0 * strength)
+
+
+def _mutation_lower_activation_border(state: dict, strength: float) -> None:
+    state["adaptive"] = True
+    _prefer_policy(state, sat_composer.EXCITABLE_POLICY)
+    state["spike_threshold"] = max(0.10, state["spike_threshold"] - 0.16 * strength)
+    state["noise_delta"] = 0.004 * strength
+
+
+def _mutation_mutate_memory_decay(state: dict, strength: float) -> None:
+    state["adaptive"] = True
+    state["memory_decay"] = max(0.72, state["memory_decay"] - 0.10 * strength)
+    state["memory_drive"] = min(0.28, state["memory_drive"] + 0.08 * strength)
+
+
+def _mutation_reweight_transform(state: dict, strength: float) -> None:
+    _prefer_policy(state, sat_composer.EXCITABLE_POLICY)
+    state["spike_threshold"] = max(0.14, state["spike_threshold"] - 0.07 * strength)
+    state["learning_rate_scale"] = 1.0 + 0.12 * strength
+
+
+def _mutation_inhibit_or_rescale(state: dict, strength: float) -> None:
+    state["learning_rate_scale"] = 1.0 - 0.18 * strength
+    state["inertia_delta"] = -0.03 * strength
+    state["noise_delta"] = -0.003 * strength
+
+
+def _mutation_instrument_or_expose(state: dict, strength: float) -> None:
+    state["adaptive"] = True
+    _prefer_policy(state, sat_composer.CURRICULUM_SEED_POLICY)
+    state["memory_drive"] = min(0.24, state["memory_drive"] + 0.04 * strength)
+
+
+def _mutation_increase_resolution(state: dict, strength: float) -> None:
+    _prefer_policy(state, sat_composer.CURRICULUM_SEED_POLICY)
+    state["spike_slope"] = min(14.0, state["spike_slope"] + 1.5 * strength)
+
+
+def _mutation_recombine_provider(state: dict, strength: float) -> None:
+    state["policy"] = sat_composer.CURRICULUM_SEED_POLICY
+    state["spike_threshold"] = max(0.16, state["spike_threshold"] - 0.05 * strength)
+
+
+def _mutation_tighten_constraint(state: dict, strength: float) -> None:
+    state["learning_rate_scale"] = 0.96
+    state["noise_delta"] = -0.002 * strength
+
+
+def _mutation_default(state: dict, strength: float) -> None:
+    _prefer_policy(state, sat_composer.EXCITABLE_POLICY)
+    state["spike_threshold"] = max(0.15, state["spike_threshold"] - 0.05 * strength)
+
+
+_MUTATION_HANDLERS: dict[str, Callable[[dict, float], None]] = {
+    "retune_gate": _mutation_retune_gate,
+    "lower_activation_border": _mutation_lower_activation_border,
+    "mutate_memory_decay": _mutation_mutate_memory_decay,
+    "reweight_transform": _mutation_reweight_transform,
+    "inhibit_or_rescale": _mutation_inhibit_or_rescale,
+    "instrument_or_expose": _mutation_instrument_or_expose,
+    "increase_resolution": _mutation_increase_resolution,
+    "recombine_provider": _mutation_recombine_provider,
+    "tighten_constraint": _mutation_tighten_constraint,
+}
+
+
 def mutation_controls_from_candidate(
     candidate: GeneMutationCandidate,
     *,
@@ -873,68 +949,34 @@ def mutation_controls_from_candidate(
         )
 
     strength = clamp01(candidate.score)
-    mutated_adaptive = adaptive
-    mutated_policy = policy
-    mutated_threshold = spike_threshold
-    mutated_slope = spike_slope
-    mutated_decay = memory_decay
-    mutated_drive = memory_drive
-    learning_rate_scale = 1.0
-    inertia_delta = 0.0
-    noise_delta = 0.0
+    state = {
+        "adaptive": adaptive,
+        "policy": policy,
+        "spike_threshold": spike_threshold,
+        "spike_slope": spike_slope,
+        "memory_decay": memory_decay,
+        "memory_drive": memory_drive,
+        "learning_rate_scale": 1.0,
+        "inertia_delta": 0.0,
+        "noise_delta": 0.0,
+    }
 
-    if candidate.mutation == "retune_gate":
-        mutated_adaptive = True
-        mutated_policy = policy if policy != "baseline" else sat_composer.CURRICULUM_SEED_POLICY
-        mutated_threshold = max(0.12, spike_threshold - 0.10 * strength)
-        mutated_slope = min(14.0, spike_slope + 2.0 * strength)
-    elif candidate.mutation == "lower_activation_border":
-        mutated_adaptive = True
-        mutated_policy = policy if policy != "baseline" else sat_composer.EXCITABLE_POLICY
-        mutated_threshold = max(0.10, spike_threshold - 0.16 * strength)
-        noise_delta = 0.004 * strength
-    elif candidate.mutation == "mutate_memory_decay":
-        mutated_adaptive = True
-        mutated_decay = max(0.72, memory_decay - 0.10 * strength)
-        mutated_drive = min(0.28, memory_drive + 0.08 * strength)
-    elif candidate.mutation == "reweight_transform":
-        mutated_policy = policy if policy != "baseline" else sat_composer.EXCITABLE_POLICY
-        mutated_threshold = max(0.14, spike_threshold - 0.07 * strength)
-        learning_rate_scale = 1.0 + 0.12 * strength
-    elif candidate.mutation == "inhibit_or_rescale":
-        learning_rate_scale = 1.0 - 0.18 * strength
-        inertia_delta = -0.03 * strength
-        noise_delta = -0.003 * strength
-    elif candidate.mutation == "instrument_or_expose":
-        mutated_adaptive = True
-        mutated_policy = policy if policy != "baseline" else sat_composer.CURRICULUM_SEED_POLICY
-        mutated_drive = min(0.24, memory_drive + 0.04 * strength)
-    elif candidate.mutation == "increase_resolution":
-        mutated_policy = policy if policy != "baseline" else sat_composer.CURRICULUM_SEED_POLICY
-        mutated_slope = min(14.0, spike_slope + 1.5 * strength)
-    elif candidate.mutation == "recombine_provider":
-        mutated_policy = sat_composer.CURRICULUM_SEED_POLICY
-        mutated_threshold = max(0.16, spike_threshold - 0.05 * strength)
-    elif candidate.mutation == "tighten_constraint":
-        learning_rate_scale = 0.96
-        noise_delta = -0.002 * strength
-    else:
-        mutated_policy = policy if policy != "baseline" else sat_composer.EXCITABLE_POLICY
-        mutated_threshold = max(0.15, spike_threshold - 0.05 * strength)
+    handler = _MUTATION_HANDLERS.get(candidate.mutation, _mutation_default)
+    handler(state, strength)
 
     return MutationControls(
         enabled=True,
         mutation=candidate.mutation,
         source_gene=candidate.gene,
-        adaptive=mutated_adaptive,
-        policy=mutated_policy,
-        spike_threshold=mutated_threshold,
-        spike_slope=mutated_slope,
-        memory_decay=mutated_decay,
-        memory_drive=mutated_drive,
-        learning_rate_scale=max(0.70, min(1.25, learning_rate_scale)),
-        inertia_delta=max(-0.08, min(0.04, inertia_delta)),
-        noise_delta=max(-0.008, min(0.010, noise_delta)),
+        adaptive=state["adaptive"],
+        policy=state["policy"],
+        spike_threshold=state["spike_threshold"],
+        spike_slope=state["spike_slope"],
+        memory_decay=state["memory_decay"],
+        memory_drive=state["memory_drive"],
+        learning_rate_scale=max(0.70, min(1.25, state["learning_rate_scale"])),
+        inertia_delta=max(-0.08, min(0.04, state["inertia_delta"])),
+        noise_delta=max(-0.008, min(0.010, state["noise_delta"])),
     )
 
 
