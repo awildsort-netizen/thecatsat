@@ -6,6 +6,7 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "tsx test.ts",
     "demo": "tsx demo.ts",
-    "all": "npm run check && npm run test && npm run demo"
+    "validate-fixtures": "tsx fixtures/validate.ts",
+    "all": "npm run check && npm run test && npm run demo && npm run validate-fixtures"
   }
 }

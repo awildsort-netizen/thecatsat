@@ -43,11 +43,23 @@ the comments here.
 
 ```
 cd parser_evolver
-npm run check   # tsc --noEmit
-npm run test    # tsx test.ts
-npm run demo    # tsx demo.ts
-npm run all     # all three
+npm run check              # tsc --noEmit
+npm run test               # tsx test.ts
+npm run demo               # tsx demo.ts
+npm run validate-fixtures  # tsx fixtures/validate.ts
+npm run all                # all of the above
 ```
+
+## Training data
+
+`fixtures/` holds a bounded snapshot set (real HTML from a small list of
+public Blockchain.com pages plus one PRNewswire URL) and a hand-labeled
+`training.csv` that maps each row to an `evidence_quote` present verbatim in
+its snapshot. The validator (`npm run validate-fixtures`) re-checks columns,
+vocabulary, snapshot existence, and evidence-quote presence so the CSV
+cannot silently drift from the snapshots. See `fixtures/README.md` for the
+refresh procedure and the note that snapshots are fixtures, not crawler
+output.
 
 ## Typed hallucinations
 
