@@ -11,37 +11,74 @@ the comments here.
 
 ## Files
 
-- `types.ts` — `ParseOperator`, `Gene`, `GeneString`, `CsvAF`, etc. Operators
-  carry an `OperatorSignature` of needs/provides/tokens; the solver composes
-  by signature, not by hand-wired conditionals.
-- `embedding.ts` — symbolic operator embedding (token-bag cosine). Free
-  polymorphism: relatives of needed work rank above strangers.
-- `operators.ts` — four primitives: `normalize.whitespace`, `regex.emit`,
-  `row.assemble.proximity`, `row.enforce.schema`. Every emitted cell carries
-  its source `Span`.
-- `af.ts` — `companyUpdatesAF`: required columns (date, title, url),
-  cell-sourced constraint, run-level diversity bonus, heavy hallucination
-  penalty.
-- `solver.ts` — `makeBeamSolver({beam, maxLen})`. Beam search over
-  gene-strings of length ≤ `maxLen`, extensions discovered by
-  signature-driven eligibility.
+- `types.ts` — `ParseOperator` (needs/provides/embedding-tokens),
+  `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the first-class typed
+  hallucination artifacts: `Hallucination`, `HallucinationKind`,
+  `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader design hook.
+- `embedding.ts` — symbolic operator embedding (token-bag cosine). Used by
+  the solver to prune extensions by similarity to *remaining* AF needs.
+- `operators.ts` — five primitives plus an AF-bound enforcer:
+  `normalize.whitespace`, `regex.emit.url`, `regex.emit.date` (excludes
+  dates inside URL slugs), `regex.emit.title` (excludes date-like and
+  url-like lines), `row.assemble.proximity` (per-date forward window),
+  and `makeEnforceSchema(af)` which filters rows by the AF's
+  `rowConstraints` and emits typed `validator_rejection` hallucinations.
+  Regex spans come from the `d` (indices) flag, not `indexOf`.
+- `af.ts` — `companyUpdatesAF`: required `date`/`title`, optional `url`,
+  typed `hallucinations(rows)` that detect `unsupported_cell`,
+  `validator_rejection`, `field_role_confusion`, `missing_emitter`,
+  `low_coverage_region`, `overfit_pattern`.
+- `solver.ts` — `makeBeamSolver({beam, maxLen, extensionTopK})`. Beam
+  search over gene-strings; extensions are pruned by cosine to
+  *remaining* AF needs (operators whose provides are saturated drop to
+  near-zero); ties on total score break by last-gene similarity;
+  candidates are deduped by gene-string identity.
 - `demo.ts` — runs the solver over Blockchain.com-style sample text.
-- `test.ts` — tiny assertion runner that the AF actually punishes lying
-  creatures.
+- `test.ts` — 14 assertions covering slice equality, validator round-trip,
+  role-misassignment guards, URL cross-bleed, fabricated row penalty,
+  typed-hallucination kinds, embedding-driven (topK=1) discovery, and
+  TraceRegion consistency.
 
 ## Run
 
 ```
-npx tsx parser_evolver/demo.ts
-npx tsx parser_evolver/test.ts
+cd parser_evolver
+npm run check   # tsc --noEmit
+npm run test    # tsx test.ts
+npm run demo    # tsx demo.ts
+npm run all     # all three
 ```
+
+## Typed hallucinations
+
+`Hallucination` is a sum type. Each kind has a `weight` that the AF folds
+into `scoreRun`. Kinds today:
+
+| Kind | When it fires |
+| --- | --- |
+| `unsupported_cell` | cell carries no usable source span |
+| `misassigned_span` | (reserved) span belongs to another field's region |
+| `field_role_confusion` | value validates as field A but was emitted as B |
+| `missing_emitter` | required column has no emitter contributing |
+| `validator_rejection` | value present but failed column validator |
+| `low_coverage_region` | no rows assembled |
+| `overfit_pattern` | a field emitted >3× rows count |
+
+`FailurePressure` is the type-level hook for "persistent hallucinations
+propose new operators" — `propose()` is intentionally undefined here so a
+future mutation operator can fill it in.
+
+`TraceRegion` is the minimum data hook for later flow-regression passes:
+every emitter writes one per cell, the cell points back via
+`FieldHypothesis.traceRegionId`, and the candidate carries the full
+`traces` list. Riordan-style flow regression can grow on top of this
+without touching existing operators.
 
 ## What this seed is *not* yet
 
-- No motif fusion, no streamable-gene decoder, no concentration field. The
-  bytecode here is flat. Distributions over genes are a natural next step.
-- No GPU/shader pipeline. `RowKernel` in `types.ts` is the design hook for
-  later lowering a heap of rows to a `kernel(row, col) -> cell` pass.
-- No mutation/crossover yet — only enumerative/beam search. A mutation
-  operator that swaps a gene for an embedding-near relative is the obvious
-  first evolutionary step.
+- No motif fusion / streamable gene decoder; bytecode is flat.
+- No mutation/crossover. The obvious first move is an embedding-near
+  gene swap, then a hallucination-driven `propose()` that asks for new
+  emitters when a kind persists.
+- No GPU/shader pipeline. `RowKernel` is only the design hook.
+- `misassigned_span` is reserved but not yet detected.

@@ -3,10 +3,11 @@
 // Run with: npx tsx parser_evolver/demo.ts
 //
 // The sample text mimics the shape of a status/blog index — date, title,
-// trailing url — interleaved with chatter the AF should reject.
+// trailing url — interleaved with chatter the AF should reject. URLs end
+// in date-shaped slugs so the date-vs-URL exclusion gets exercised.
 
-import { companyUpdatesAF } from "./af.js";
-import { PRIMITIVES } from "./operators.js";
+import { companyUpdatesAF, summarisePressure } from "./af.js";
+import { PRIMITIVES, makeEnforceSchema } from "./operators.js";
 import { makeBeamSolver } from "./solver.js";
 import type { ParseContext } from "./types.js";
 
@@ -39,8 +40,9 @@ const ctx: ParseContext = {
   sourceType: "status-page",
 };
 
-const solver = makeBeamSolver({ beam: 6, maxLen: 5 });
-const candidates = solver.search(ctx, companyUpdatesAF, PRIMITIVES);
+const ops = [...PRIMITIVES, makeEnforceSchema(companyUpdatesAF)];
+const solver = makeBeamSolver({ beam: 8, maxLen: 6, extensionTopK: 4 });
+const candidates = solver.search(ctx, companyUpdatesAF, ops);
 
 const top = candidates[0];
 console.log("=== top parser-creature ===");
@@ -50,11 +52,16 @@ console.log("\nemitted rows (each cell shows the source span it points to):");
 top?.rows.forEach((row, i) => {
   console.log(`row ${i}:`);
   Object.entries(row.fields).forEach(([k, f]) => {
-    console.log(`  ${k.padEnd(6)} span=${JSON.stringify(f.span)} value=${JSON.stringify(f.value)}`);
+    console.log(
+      `  ${k.padEnd(6)} span=${JSON.stringify(f.span)} value=${JSON.stringify(f.value)} trace=${f.traceRegionId ?? "-"}`,
+    );
   });
 });
 
-console.log("\n=== runner-up creatures (top 3) ===");
-candidates.slice(0, 3).forEach((c, i) => {
+console.log("\n=== typed hallucination pressure ===");
+console.log(summarisePressure(top?.rows ?? []));
+
+console.log("\n=== runner-up creatures (top 5) ===");
+candidates.slice(0, 5).forEach((c, i) => {
   console.log(`#${i} score=${c.score.toFixed(3)} genes=[${c.genes.map((g) => g.operatorId).join(", ")}]`);
 });

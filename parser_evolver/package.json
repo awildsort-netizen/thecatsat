@@ -1,0 +1,11 @@
+{
+  "name": "parser-evolver",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx test.ts",
+    "demo": "tsx demo.ts",
+    "all": "npm run check && npm run test && npm run demo"
+  }
+}
