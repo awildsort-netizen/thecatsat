@@ -5,7 +5,7 @@
 // "the pipeline ran".
 
 import { companyUpdatesAF, summarisePressure } from "./af.js";
-import { PRIMITIVES, makeEnforceSchema } from "./operators.js";
+import { PRIMITIVES, makeEnforceSchema, regexEmitDate } from "./operators.js";
 import { makeBeamSolver } from "./solver.js";
 import type { FieldHypothesis, ParseContext, RowHypothesis } from "./types.js";
 
@@ -146,6 +146,31 @@ assert("top candidate accumulates at least one TraceRegion", traces.length > 0);
 assert(
   "every kept cell that has a traceRegionId points to a real trace region",
   cells.every((c) => c.traceRegionId === undefined || traces.some((t) => t.id === c.traceRegionId)),
+);
+
+// --- defineOperator: signature is derived from IO, not hand-authored -------
+// `regexEmitDate` is built via `defineOperator`; the assertions below
+// witness that its `signature.needs` / `signature.provides` line up with
+// its declared IO channels (not with a manually-maintained string list),
+// and that the solver picks it up as a normal `ParseOperator` — proving
+// that signature-by-reflection participates in composition.
+assert(
+  "regexEmitDate.signature.needs is derived from declared needs channels",
+  ["text.normalized", "spans.url"].every((k) => regexEmitDate.signature.needs.includes(k)) &&
+    regexEmitDate.signature.needs.length === 2,
+  `needs=${regexEmitDate.signature.needs.join(",")}`,
+);
+assert(
+  "regexEmitDate.signature.provides is derived from declared output channels",
+  ["spans.dated", "trace.regions"].every((k) => regexEmitDate.signature.provides.includes(k)) &&
+    regexEmitDate.signature.provides.length === 2,
+  `provides=${regexEmitDate.signature.provides.join(",")}`,
+);
+const dateChainTop = top?.genes.some((g) => g.operatorId === "regex.emit.date");
+assert(
+  "the signature-derived operator participates in the top creature",
+  dateChainTop === true,
+  `genes=${top?.genes.map((g) => g.operatorId).join(">>")}`,
 );
 
 const failed = assertions.filter((a) => !a.ok);

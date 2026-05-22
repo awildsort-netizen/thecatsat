@@ -28,6 +28,7 @@ import type {
   Span,
   TraceRegion,
 } from "./types.js";
+import { CHANNEL, defineOperator } from "./operator_reflection.js";
 
 // ---------------------------------------------------------------------------
 // Small helpers — pure, no for-loops.
@@ -161,29 +162,44 @@ const DATE_PARAMS: EmitParams = {
   operatorId: "regex.emit.date",
 };
 
-export const regexEmitDate: ParseOperator = {
+// regexEmitDate is built via `defineOperator` so that `signature.needs`
+// and `signature.provides` are derived from the typed `needs`/`outputs`
+// channel specs below — the implementation cannot drift from the
+// declared signature, because the same keys flow into both. Other
+// primitives keep their hand-authored signatures for now; they remain
+// useful as a comparison and can be migrated incrementally.
+export const regexEmitDate: ParseOperator = defineOperator({
   id: "regex.emit.date",
   cost: 2,
-  signature: {
-    needs: ["text.normalized", "spans.url"],
-    provides: ["spans.dated", "trace.regions"],
-    tokens: ["regex", "extract", "date", "iso", "calendar", "month"],
+  tokens: ["regex", "extract", "date", "iso", "calendar", "month"],
+  needs: {
+    "text.normalized": CHANNEL as string,
+    "spans.url": CHANNEL as readonly FieldHypothesis[],
+  },
+  reads: {
+    // Read-through accumulator: this operator extends prior regions
+    // rather than replacing them. Listed as `reads` so it is typed for
+    // the run body without becoming a solver-eligibility need.
+    "trace.regions": CHANNEL as readonly TraceRegion[],
+  },
+  outputs: {
+    "spans.dated": CHANNEL as readonly FieldHypothesis[],
+    "trace.regions": CHANNEL as readonly TraceRegion[],
   },
   run: (_ctx, input) => {
-    const bag = input as Record<string, unknown>;
-    const text = (bag["text.normalized"] as string | undefined) ?? "";
-    const urlSpans = ((bag["spans.url"] as readonly FieldHypothesis[] | undefined) ?? []).map((u) => u.span);
+    const text = input["text.normalized"] ?? "";
+    const urlSpans = (input["spans.url"] ?? []).map((u) => u.span);
     const raw = emitFrom(text, DATE_PARAMS);
     const hits = raw.filter((h) => !containedInAny(h.span, urlSpans));
     return {
       "spans.dated": hits,
       "trace.regions": [
-        ...((bag["trace.regions"] as readonly TraceRegion[] | undefined) ?? []),
+        ...(input["trace.regions"] ?? []),
         ...tracesFor(hits, DATE_PARAMS.channel, DATE_PARAMS.operatorId, "date"),
       ],
     };
   },
-};
+});
 
 // ---------------------------------------------------------------------------
 // Operator 4 — title emitter. Excludes lines that look like a date or a URL,

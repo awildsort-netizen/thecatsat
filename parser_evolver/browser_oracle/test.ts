@@ -116,9 +116,9 @@ assert(
   `urlPattern=${proposal?.urlPattern}`,
 );
 assert(
-  "proposal provides the title and body and date fields",
-  ["title", "body", "date"].every((f) => (proposal?.provides ?? []).includes(f)),
-  `provides=${proposal?.provides.join(",")}`,
+  "proposal evidenceFields cover title and body and date (provides is derived from this)",
+  ["title", "body", "date"].every((f) => (proposal?.evidenceFields ?? []).includes(f)),
+  `evidenceFields=${proposal?.evidenceFields.join(",")}`,
 );
 assert(
   "proposal has positive confidence",
@@ -131,22 +131,35 @@ assert(
   `tokens=${proposal?.materialHints.join(",")}`,
 );
 
-// Lift to a real ParseOperator — same signature shape as PRIMITIVES.
+// Lift to a real ParseOperator — same signature shape as PRIMITIVES, but
+// derived from the lifted run-body's IO (via defineOperator), not copied
+// from explicit fields on the proposal.
 const lifted = liftProposalToOperator(proposal!);
 assert(
-  "lifted operator has needs/provides/tokens (parser_evolver signature shape)",
+  "lifted operator has a derived signature with needs/provides/tokens",
   Array.isArray(lifted.signature.needs) &&
     Array.isArray(lifted.signature.provides) &&
     Array.isArray(lifted.signature.tokens),
 );
 assert(
-  "lifted operator's run returns a structured proposal (no network executed)",
+  "lifted operator's needs is empty (source operator; reads nothing upstream)",
+  lifted.signature.needs.length === 0,
+  `needs=${lifted.signature.needs.join(",")}`,
+);
+assert(
+  "lifted operator provides the proposal-output channel (derived from IO)",
+  lifted.signature.provides.includes("browser_oracle.proposal"),
+  `provides=${lifted.signature.provides.join(",")}`,
+);
+assert(
+  "lifted operator's run returns a structured proposal in the typed output channel",
   (() => {
     const out = lifted.run(
       { url: ipoTrace.pageUrl, rawText: "", normalizedText: "" },
       { from: "test" },
     ) as Record<string, unknown>;
-    return out.proposalId === proposal!.id && typeof out.note === "string";
+    const payload = out["browser_oracle.proposal"] as Record<string, unknown> | undefined;
+    return payload?.proposalId === proposal!.id && typeof payload?.note === "string";
   })(),
 );
 

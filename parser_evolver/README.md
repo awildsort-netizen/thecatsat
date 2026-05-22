@@ -18,6 +18,12 @@ why the typed `Hallucination` artifacts are shaped the way they are.
   `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the first-class typed
   hallucination artifacts: `Hallucination`, `HallucinationKind`,
   `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader design hook.
+- `operator_reflection.ts` — `defineOperator(...)` builds a
+  `ParseOperator` whose `signature.needs`/`signature.provides` is
+  **derived** from the typed `needs`/`outputs` channel specs of the run
+  body. Function signatures are the source of truth; the string-arrays
+  in `OperatorSignature` are a projection. See
+  [`docs/signatures_first.md`](docs/signatures_first.md).
 - `embedding.ts` — symbolic operator embedding (token-bag cosine). Used by
   the solver to prune extensions by similarity to *remaining* AF needs.
 - `operators.ts` — five primitives plus an AF-bound enforcer:

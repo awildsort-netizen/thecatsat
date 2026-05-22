@@ -72,26 +72,26 @@ for (const f of dist.urlConstructionFragments) {
   console.log(`  ${f.kind.padEnd(14)} ${f.value}${f.note ? `   // ${f.note}` : ""}`);
 }
 
-banner("Step 4: proposed static operator");
+banner("Step 4: proposed static operator (authored material only)");
 for (const p of dist.proposedOperators) {
-  console.log(`id:        ${p.id}`);
-  console.log(`needs:     ${p.needs.join(", ")}`);
-  console.log(`provides:  ${p.provides.join(", ")}`);
-  console.log(`tokens:    ${p.tokens.join(", ")}`);
-  console.log(`pattern:   ${p.urlPattern ?? "(literal)"}`);
+  console.log(`id:             ${p.id}`);
+  console.log(`evidenceFields: ${p.evidenceFields.join(", ")}    // signature.provides is derived from this`);
+  console.log(`tokens:         ${p.tokens.join(", ")}`);
+  console.log(`pattern:        ${p.urlPattern ?? "(literal)"}`);
   console.log(`requestTemplate.url: ${p.requestTemplate.url.slice(0, 100)}…`);
-  console.log(`confidence: ${p.confidence}`);
+  console.log(`confidence:     ${p.confidence}`);
 }
 
-banner("Step 5: lift proposal to a parser_evolver ParseOperator");
+banner("Step 5: lift proposal to a parser_evolver ParseOperator (signature derived)");
 const lifted = liftProposalToOperator(dist.proposedOperators[0]!);
 console.log(`lifted operator id: ${lifted.id}`);
-console.log(`lifted signature:   ${JSON.stringify(lifted.signature)}`);
+console.log(`lifted signature:   ${JSON.stringify(lifted.signature)}    // needs/provides reflect the IO of the run-body, not authored fields`);
 const liftedOut = lifted.run(
   { url: ipoTrace.pageUrl, rawText: "", normalizedText: "" },
   { from: "demo" },
 ) as Record<string, unknown>;
-console.log(`lifted.run output:  ${JSON.stringify({ proposalId: liftedOut.proposalId, evidenceFields: liftedOut.evidenceFields })}`);
+const liftedPayload = liftedOut["browser_oracle.proposal"] as Record<string, unknown>;
+console.log(`lifted.run output:  ${JSON.stringify({ proposalId: liftedPayload.proposalId, evidenceFields: liftedPayload.evidenceFields })}`);
 
 banner("Step 6: bridge into a prepass hint");
 const hint = hintFromDistillation(ipoRow, dist);

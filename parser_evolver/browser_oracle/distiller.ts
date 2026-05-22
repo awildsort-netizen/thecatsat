@@ -30,11 +30,13 @@ import type {
   NetworkRequestTrace,
   ProposedStaticOperator,
   RememberedAbsence,
+  RequestTemplate,
   TraceDistillation,
   UrlConstructionFragment,
   ResourceType,
 } from "./types.js";
 import type { ParseOperator } from "../types.js";
+import { CHANNEL, defineOperator } from "../operator_reflection.js";
 
 export function loadTrace(path: string): BrowserOracleTrace {
   return JSON.parse(readFileSync(path, "utf8")) as BrowserOracleTrace;
@@ -227,10 +229,12 @@ const proposeOperator = (
   const ok = ev.request.status >= 200 && ev.request.status < 300 ? 1 : 0;
   const coverage = evidenceFields.length / Math.max(1, targets.length);
   const confidence = Math.min(0.95, Math.max(0, ok * (0.3 + 0.4 * useful + 0.4 * coverage)));
+  // Note: `needs`/`provides` are deliberately not set on the proposal.
+  // The lifter derives them from the implementation IO so the proposal
+  // carries only authored material (evidenceFields, requestTemplate,
+  // materialHints) and signature is a downstream projection.
   return {
     id: operatorIdFor(ev.request, source_id),
-    needs: ["url"],
-    provides: evidenceFields,
     tokens: materialHintsFor(ev.request),
     requestTemplate: {
       url: ev.request.url,
@@ -375,21 +379,42 @@ export function distillTrace(
 // shape that a downstream emitter can hand to the AF. We keep the
 // actual fetch out of this prototype on purpose; the point is that the
 // *operator shape* fits the parser_evolver vocabulary unchanged.
+//
+// The signature is *derived* from the IO declaration below via
+// `defineOperator`. `needs` is empty (the lifted operator reads nothing
+// from upstream — it is a source-style operator that announces a fetch
+// plan) and `provides` is a single proposal-output channel keyed by
+// the proposal id. Per-evidence-field provides are intentionally not
+// claimed here, because this stub does not actually carry the bytes —
+// the surrounding harness must execute the fetch and feed the result
+// back. Lying about provides would defeat the whole point of letting
+// signatures reflect implementation.
 // ---------------------------------------------------------------------------
 
-export const liftProposalToOperator = (proposal: ProposedStaticOperator): ParseOperator => ({
-  id: proposal.id,
-  cost: proposal.cost,
-  signature: {
-    needs: proposal.needs,
-    provides: proposal.provides,
+export type ProposalRunOutput = {
+  readonly proposalId: string;
+  readonly requestTemplate: RequestTemplate;
+  readonly evidenceFields: readonly string[];
+  readonly upstream: unknown;
+  readonly note: string;
+};
+
+export const liftProposalToOperator = (proposal: ProposedStaticOperator): ParseOperator =>
+  defineOperator({
+    id: proposal.id,
+    cost: proposal.cost,
     tokens: proposal.tokens,
-  },
-  run: (_ctx, input) => ({
-    proposalId: proposal.id,
-    requestTemplate: proposal.requestTemplate,
-    evidenceFields: proposal.evidenceFields,
-    upstream: input,
-    note: "Lifted from a browser-oracle TraceDistillation. Static fetch is not executed inside parser_evolver; the surrounding harness must perform the request and feed bytes back as ParseContext.rawText.",
-  }),
-});
+    needs: {},
+    outputs: {
+      "browser_oracle.proposal": CHANNEL as ProposalRunOutput,
+    },
+    run: (_ctx, _input) => ({
+      "browser_oracle.proposal": {
+        proposalId: proposal.id,
+        requestTemplate: proposal.requestTemplate,
+        evidenceFields: proposal.evidenceFields,
+        upstream: _input,
+        note: "Lifted from a browser-oracle TraceDistillation. Static fetch is not executed inside parser_evolver; the surrounding harness must perform the request and feed bytes back as ParseContext.rawText.",
+      },
+    }),
+  });

@@ -53,9 +53,16 @@ loop is the distillation, operator synthesis, and remembered absence.
        requests** that together carry every target field;
      - emits **URL-construction fragments** describing how the URL was
        built (Next.js `buildId`, `slug`, query params);
-     - emits a **`ProposedStaticOperator`** per minimal request, shaped
-       exactly like a `ParseOperator`: `needs`, `provides`, `tokens`,
-       `cost`. For Next.js route-data fetches the operator id is the
+     - emits a **`ProposedStaticOperator`** per minimal request,
+       carrying only authored material (`evidenceFields`,
+       `requestTemplate`, `materialHints`, `tokens`, `cost`). The
+       `needs` / `provides` signature is **derived** at
+       `liftProposalToOperator` time from the lifted run-body's IO
+       shape via [`defineOperator`](../operator_reflection.ts) — it is
+       not hand-authored on the proposal, because that would duplicate
+       (and inevitably drift from) the implementation. See
+       [`../docs/signatures_first.md`](../docs/signatures_first.md).
+       For Next.js route-data fetches the operator id is the
        well-known `next.route_payload.fetch`; otherwise we synthesise
        `static.fetch.<source_id>_payload`;
      - **records remembered absence** for any required field the trace
