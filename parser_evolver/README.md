@@ -6,8 +6,11 @@ operators — and asks the `CsvAF` climate which creatures fold a page into a
 stable table without lying about the source.
 
 This is a seed, deliberately small. See `docs/interpretation_sieve.md` and
-`docs/tests_as_activation_factors.md` for the H7/thecatsat language used in
-the comments here.
+`docs/tests_as_activation_factors.md` (top-level) for the H7/thecatsat
+language used in the comments here, and
+[`parser_evolver/docs/hallucination_geometry.md`](docs/hallucination_geometry.md)
+for the design note on semantic plaque, operator material profiles, and
+why the typed `Hallucination` artifacts are shaped the way they are.
 
 ## Files
 
