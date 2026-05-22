@@ -47,6 +47,10 @@ npm run check              # tsc --noEmit
 npm run test               # tsx test.ts
 npm run demo               # tsx demo.ts
 npm run validate-fixtures  # tsx fixtures/validate.ts
+npm run prepass            # tsx prepass/run.ts        (stdout digest)
+npm run prepass -- --write # also write fixtures/digest.csv + digest.json
+npm run prepass-test       # tsx prepass/test.ts       (19 assertions)
+npm run validate-digest    # tsx prepass/validate-digest.ts
 npm run all                # all of the above
 ```
 
@@ -60,6 +64,17 @@ vocabulary, snapshot existence, and evidence-quote presence so the CSV
 cannot silently drift from the snapshots. See `fixtures/README.md` for the
 refresh procedure and the note that snapshots are fixtures, not crawler
 output.
+
+## Monitor pre-pass
+
+`prepass/` runs `parser_evolver` over the bounded fixture snapshots and
+emits a structured candidate digest (vocabulary-controlled fields plus
+`confidence`, typed `hallucination_kinds`, and `trace_region_count`) that a
+future Blockchain.com monitor could read instead of re-extracting from raw
+HTML on every tick. SPA-shell and 404 snapshots are honestly *escalated*
+to `needs-rendered-fetch` / `flag-for-review` rather than fabricated. See
+`prepass/README.md`. **No network I/O; the scheduled monitor is not
+touched.**
 
 ## Typed hallucinations
 

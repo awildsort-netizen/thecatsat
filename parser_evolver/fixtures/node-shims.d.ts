@@ -6,6 +6,7 @@
 declare module "node:fs" {
   export function readFileSync(path: string, encoding: "utf8"): string;
   export function existsSync(path: string): boolean;
+  export function writeFileSync(path: string, data: string): void;
 }
 
 declare module "node:path" {
@@ -17,4 +18,9 @@ declare module "node:url" {
   export function fileURLToPath(url: string): string;
 }
 
-declare const process: { exit(code?: number): never };
+declare const process: {
+  exit(code?: number): never;
+  readonly argv: readonly string[];
+  readonly stdout: { write(chunk: string): boolean };
+  readonly stderr: { write(chunk: string): boolean };
+};

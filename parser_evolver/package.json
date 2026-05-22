@@ -7,6 +7,9 @@
     "test": "tsx test.ts",
     "demo": "tsx demo.ts",
     "validate-fixtures": "tsx fixtures/validate.ts",
-    "all": "npm run check && npm run test && npm run demo && npm run validate-fixtures"
+    "prepass": "tsx prepass/run.ts",
+    "prepass-test": "tsx prepass/test.ts",
+    "validate-digest": "tsx prepass/validate-digest.ts",
+    "all": "npm run check && npm run test && npm run demo && npm run validate-fixtures && npm run prepass-test && npm run validate-digest"
   }
 }
