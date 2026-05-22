@@ -1,0 +1,113 @@
+{
+  "_fixture_note": "Synthetic browser-oracle trace, NOT captured live. Modeled on the Blockchain.com IPO post which serves only a Next.js SPA shell to static fetches (see ../../fixtures/manifest.json :: blog-ipo-announce). The shape is what a real Playwright/Puppeteer or HAR export of that page would produce: a document request returns the shell, then the client fetches a Next.js route-data JSON payload that carries the post body. The text inside responseSnippet is a paraphrase of the public IPO announcement, used only as a marker that the distiller can match.",
+  "pageUrl": "https://www.blockchain.com/blog/posts/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares",
+  "capturedAt": "2026-05-22T20:00:00Z",
+  "userAgent": "fixture-oracle/0.1 (synthetic; no live capture)",
+  "captureNotes": "Synthetic fixture. See _fixture_note. Browser is treated as an oracle, not as truth.",
+  "requests": [
+    {
+      "id": "req-001",
+      "url": "https://www.blockchain.com/blog/posts/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares",
+      "method": "GET",
+      "status": 200,
+      "resourceType": "document",
+      "contentType": "text/html; charset=utf-8",
+      "requestOrder": 0,
+      "bytes": 164742,
+      "timing": {"startedAtMs": 0, "durationMs": 312},
+      "responseSnippet": "<!doctype html><html><head><title>Blockchain.com</title></head><body><div id=\"__next\"></div><script id=\"__NEXT_DATA__\" type=\"application/json\">{\"props\":{\"pageProps\":{}},\"page\":\"/blog/posts/[slug]\",\"query\":{\"slug\":\"blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares\"},\"buildId\":\"2026-05-21-abcd\"}</script></body></html>"
+    },
+    {
+      "id": "req-002",
+      "url": "https://www.blockchain.com/_next/static/2026-05-21-abcd/_buildManifest.js",
+      "method": "GET",
+      "status": 200,
+      "resourceType": "script",
+      "contentType": "application/javascript",
+      "requestOrder": 1,
+      "bytes": 8421,
+      "initiator": "document",
+      "timing": {"startedAtMs": 350, "durationMs": 64}
+    },
+    {
+      "id": "req-003",
+      "url": "https://www.blockchain.com/_next/static/chunks/framework.js",
+      "method": "GET",
+      "status": 200,
+      "resourceType": "script",
+      "contentType": "application/javascript",
+      "requestOrder": 2,
+      "bytes": 142318,
+      "initiator": "document",
+      "timing": {"startedAtMs": 360, "durationMs": 180}
+    },
+    {
+      "id": "req-004",
+      "url": "https://www.blockchain.com/_next/data/2026-05-21-abcd/blog/posts/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares.json?slug=blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares",
+      "method": "GET",
+      "status": 200,
+      "resourceType": "fetch",
+      "contentType": "application/json",
+      "requestOrder": 3,
+      "bytes": 24816,
+      "initiator": "script:framework.js",
+      "timing": {"startedAtMs": 545, "durationMs": 96},
+      "responseSnippet": "{\"pageProps\":{\"post\":{\"slug\":\"blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares\",\"title\":\"Blockchain.com Announces Confidential Submission of Draft Registration Statement for Proposed Initial Public Offering of Class A Ordinary Shares\",\"publishedAt\":\"2026-05-20\",\"body\":\"Blockchain.com today announced that it has confidentially submitted a draft registration statement on Form F-1 to the U.S. Securities and Exchange Commission relating to the proposed initial public offering of its Class A ordinary shares.\"}},\"__N_SSG\":true}"
+    },
+    {
+      "id": "req-005",
+      "url": "https://cdn.blockchain.com/assets/og-image-ipo.png",
+      "method": "GET",
+      "status": 200,
+      "resourceType": "image",
+      "contentType": "image/png",
+      "requestOrder": 4,
+      "bytes": 84021,
+      "initiator": "script:framework.js",
+      "timing": {"startedAtMs": 720, "durationMs": 140}
+    },
+    {
+      "id": "req-006",
+      "url": "https://www.google-analytics.com/g/collect?v=2&tid=G-XXXXX",
+      "method": "POST",
+      "status": 204,
+      "resourceType": "xhr",
+      "contentType": "text/plain",
+      "requestOrder": 5,
+      "bytes": 0,
+      "initiator": "script:analytics.js",
+      "timing": {"startedAtMs": 905, "durationMs": 21}
+    }
+  ],
+  "scripts": [
+    {"url": "https://www.blockchain.com/_next/static/chunks/framework.js", "bytes": 142318, "note": "Next.js framework + page chunks; consumes /_next/data/.../[slug].json on hydration."}
+  ],
+  "hydrationPayloads": [
+    {
+      "framework": "next",
+      "key": "__NEXT_DATA__",
+      "bytes": 412,
+      "textSnippet": "{\"props\":{\"pageProps\":{}},\"page\":\"/blog/posts/[slug]\",\"query\":{\"slug\":\"blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares\"},\"buildId\":\"2026-05-21-abcd\"}"
+    }
+  ],
+  "candidateEvidenceRegions": [
+    {
+      "label": "post-title",
+      "text": "Blockchain.com Announces Confidential Submission of Draft Registration Statement for Proposed Initial Public Offering of Class A Ordinary Shares",
+      "cssPath": "article > header > h1",
+      "fields": ["title"]
+    },
+    {
+      "label": "post-body-lede",
+      "text": "Blockchain.com today announced that it has confidentially submitted a draft registration statement on Form F-1 to the U.S. Securities and Exchange Commission relating to the proposed initial public offering of its Class A ordinary shares.",
+      "cssPath": "article > section",
+      "fields": ["body"]
+    },
+    {
+      "label": "post-date",
+      "text": "2026-05-20",
+      "cssPath": "article > header > time",
+      "fields": ["date"]
+    }
+  ]
+}
