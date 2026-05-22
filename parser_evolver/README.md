@@ -14,21 +14,19 @@ why the typed `Hallucination` artifacts are shaped the way they are.
 
 ## Files
 
-- `types.ts` — `ParseOperator` (needs/provides/embedding-tokens),
-  `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the first-class typed
-  hallucination artifacts: `Hallucination`, `HallucinationKind`,
-  `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader design hook.
+- `types.ts` — `ParseOperator` (carries a single `io: OperatorIO`
+  record with `requiredInputs`, `optionalInputs`, `outputs`, `tokens`),
+  `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the first-class
+  typed hallucination artifacts: `Hallucination`, `HallucinationKind`,
+  `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader hook.
 - `operator_reflection.ts` — `defineOperator(...)` builds a
   `ParseOperator` from a single typed `inputs`/`outputs` channel
   spec. Channels marked `required<T>()` gate solver eligibility;
-  channels marked `optional<T>()` are typed as `?`-properties on
-  the run body's input bag (the same `?` TypeScript uses for any
-  optional property) and are NOT projected into eligibility. The
-  legacy `signature: {needs, provides, tokens}` shape is preserved
-  via a `toLegacySignature` adapter so the existing solver, embedding,
-  and bytecode-disassembler code consume it unchanged — but it is
-  now a derived projection of the typed IO, not first-class
-  vocabulary. See [`docs/signatures_first.md`](docs/signatures_first.md).
+  channels marked `optional<T>()` are typed as `?`-properties on the
+  run body's input bag (the same `?` TypeScript uses for any optional
+  property). `op.io` is reflected from the spec — no parallel
+  hand-authored signature. See
+  [`docs/signatures_first.md`](docs/signatures_first.md).
 - `embedding.ts` — symbolic operator embedding (token-bag cosine). Used by
   the solver to prune extensions by similarity to *remaining* AF needs.
 - `operators.ts` — five primitives plus an AF-bound enforcer:

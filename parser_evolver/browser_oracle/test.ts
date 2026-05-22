@@ -131,25 +131,25 @@ assert(
   `tokens=${proposal?.materialHints.join(",")}`,
 );
 
-// Lift to a real ParseOperator — same signature shape as PRIMITIVES, but
-// derived from the lifted run-body's IO (via defineOperator), not copied
-// from explicit fields on the proposal.
+// Lift to a real ParseOperator — `io` is derived from the lifted run
+// body's typed channel spec via defineOperator, not copied from
+// explicit fields on the proposal.
 const lifted = liftProposalToOperator(proposal!);
 assert(
-  "lifted operator has a derived signature with needs/provides/tokens",
-  Array.isArray(lifted.signature.needs) &&
-    Array.isArray(lifted.signature.provides) &&
-    Array.isArray(lifted.signature.tokens),
+  "lifted operator has a derived io with requiredInputs/outputs/tokens",
+  Array.isArray(lifted.io.requiredInputs) &&
+    Array.isArray(lifted.io.outputs) &&
+    Array.isArray(lifted.io.tokens),
 );
 assert(
-  "lifted operator's needs is empty (source operator; reads nothing upstream)",
-  lifted.signature.needs.length === 0,
-  `needs=${lifted.signature.needs.join(",")}`,
+  "lifted operator's requiredInputs is empty (source operator; reads nothing upstream)",
+  lifted.io.requiredInputs.length === 0,
+  `requiredInputs=${lifted.io.requiredInputs.join(",")}`,
 );
 assert(
-  "lifted operator provides the proposal-output channel (derived from IO)",
-  lifted.signature.provides.includes("browser_oracle.proposal"),
-  `provides=${lifted.signature.provides.join(",")}`,
+  "lifted operator outputs the proposal channel (derived from IO)",
+  lifted.io.outputs.includes("browser_oracle.proposal"),
+  `outputs=${lifted.io.outputs.join(",")}`,
 );
 assert(
   "lifted operator's run returns a structured proposal in the typed output channel",

@@ -91,22 +91,28 @@ export type FailurePressure = {
 };
 
 // ---------------------------------------------------------------------------
-// Operators: tendencies advertised by signature.
+// Operators: tendencies advertised by their typed IO.
+//
+// `io` is the single shape every consumer reads. `requiredInputs` gates
+// solver eligibility; `optionalInputs` are contextual reads (typed as
+// `?`-properties on the run body's input bag); `outputs` are the
+// channels the run body produces; `tokens` are the symbolic embedding
+// signal. The `defineOperator` helper builds these by reflecting on a
+// typed channel spec — but hand-authored operators speak exactly the
+// same vocabulary, so there's only one ontology in the system.
 // ---------------------------------------------------------------------------
 
-export type OperatorSignature = {
-  readonly needs: readonly string[];
-  readonly provides: readonly string[];
-  // Symbolic embedding tokens drawn from name/comment/file/purpose. Used by
-  // the solver's embedding similarity to discover relatives without
-  // hand-wired conditionals.
+export type OperatorIO = {
+  readonly requiredInputs: readonly string[];
+  readonly optionalInputs: readonly string[];
+  readonly outputs: readonly string[];
   readonly tokens: readonly string[];
 };
 
 export type ParseOperator = {
   readonly id: string;
   readonly cost: number;
-  readonly signature: OperatorSignature;
+  readonly io: OperatorIO;
   readonly run: (ctx: ParseContext, input: unknown) => unknown;
 };
 

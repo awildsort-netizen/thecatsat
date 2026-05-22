@@ -147,21 +147,17 @@ export type RequestTemplate = {
   readonly templatedFragments?: readonly UrlConstructionFragment[];
 };
 
-// A `ProposedStaticOperator` is a *projection* of an operator shape — it
-// is what an external browser-oracle distiller can infer from a network
-// trace. The authoritative parts are:
+// A `ProposedStaticOperator` carries only the authored material an
+// external browser-oracle distiller can infer from a network trace:
 //
 //   - `evidenceFields`: the AF columns this proposal would carry.
 //   - `requestTemplate`: the URL/method/content-type to refetch.
 //   - `materialHints`: embedding tokens harvested from the trace.
 //
-// `needs` and `provides` are intentionally NOT carried on this shape:
-// they are *derived* at `liftProposalToOperator` time from the proposal
-// (provides = evidenceFields; needs = whatever the lifted run body
-// actually consumes from the bag). Keeping them off the proposal type
-// is the small-but-load-bearing version of the project principle:
-// signatures are derived from implementation/IO shape, not authored as
-// a parallel ontology that can drift.
+// There is no `needs` / `provides` slot. The lifted operator's `io`
+// is reflected from the run body's typed channel spec at
+// `liftProposalToOperator` time. Authoring it twice would be a parallel
+// ontology — exactly the kind of duplication this prototype is pruning.
 export type ProposedStaticOperator = {
   readonly id: string;
   readonly tokens: readonly string[];

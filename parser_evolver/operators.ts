@@ -1,28 +1,30 @@
 // Primitive parse operators.
 //
-// Each operator is a tendency: it declares what channels it needs and what
-// channels it provides, and exposes embedding tokens so the solver can
-// substitute relatives without conditional branching.
+// Each operator declares a single `inputs`/`outputs` channel spec
+// through `defineOperator`. Required inputs gate solver eligibility;
+// optional inputs (typed via `optional<T>()`) are contextual reads
+// that show up as `?`-properties on the run body's input bag. The
+// operator's `io` record is derived from these declarations — no
+// hand-authored second copy.
 //
-// Channels (provides/needs):
-//   "text.normalized"       — whitespace/markup-flattened body
-//   "spans.url"             — URL spans (kept first; date detector excludes them)
-//   "spans.dated"           — date spans NOT contained in any URL span
-//   "spans.titled"          — title-like lines that are not dates and not urls
-//   "rows.assembled"        — RowHypotheses built by proximity assembly
-//   "rows.validated"        — RowHypotheses that satisfied all AF rowConstraints
-//   "trace.regions"         — TraceRegion artifacts accumulated across operators
+// Channels:
+//   "text.normalized"           — whitespace/markup-flattened body
+//   "spans.url"                 — URL spans (kept first; date detector excludes them)
+//   "spans.dated"               — date spans NOT contained in any URL span
+//   "spans.titled"              — title-like lines that are not dates and not urls
+//   "rows.assembled"            — RowHypotheses built by proximity assembly
+//   "rows.validated"            — RowHypotheses that satisfied all AF rowConstraints
+//   "trace.regions"             — TraceRegion artifacts accumulated across operators
+//   "hallucinations.collected"  — typed Hallucination artifacts from validators
 //
-// Every emitter records a TraceRegion alongside the cell. Validators or
-// downstream operators can read those regions; a validator that rejects a
-// cell can also write a typed `Hallucination` (see types.ts) into the bag
+// Every emitter records a TraceRegion alongside the cell. A validator
+// that rejects a cell writes a typed `Hallucination` (see types.ts)
 // under "hallucinations.collected", which the AF reads at scoreRun.
 
 import type {
   CsvAF,
   FieldHypothesis,
   Hallucination,
-  ParseContext,
   ParseOperator,
   RowHypothesis,
   Span,
@@ -43,8 +45,6 @@ const spanContains = (outer: Span, inner: Span): boolean =>
 const containedInAny = (s: Span, outers: readonly Span[]): boolean =>
   outers.some((o) => spanContains(o, s));
 
-// Region IDs are stable per (operator, span, channel) so traces are
-// idempotent and cells can reference them by id.
 const traceId = (operator: string, span: Span, channel: string): string =>
   `${operator}@${channel}#${span[0]}:${span[1]}`;
 
@@ -56,12 +56,10 @@ const region = (operator: string, channel: string, span: Span, label: string): T
   operator,
 });
 
-// Regex helpers — uses the `d` flag so we get capture-group indices instead
-// of fragile indexOf math.
 type EmitParams = {
   readonly field: string;
   readonly pattern: string;
-  readonly group: number; // which capture group is the cell value (0 for whole match)
+  readonly group: number;
   readonly confidence: number;
   readonly channel: string;
   readonly operatorId: string;
@@ -102,16 +100,16 @@ const tracesFor = (hits: readonly FieldHypothesis[], channel: string, operatorId
 // Operator 1 — whitespace normalization.
 // ---------------------------------------------------------------------------
 
-export const normalizeWhitespace: ParseOperator = {
+export const normalizeWhitespace = defineOperator({
   id: "normalize.whitespace",
   cost: 1,
-  signature: {
-    needs: [],
-    provides: ["text.normalized"],
-    tokens: ["normalize", "whitespace", "text", "flatten", "clean", "prep"],
+  tokens: ["normalize", "whitespace", "text", "flatten", "clean", "prep"],
+  inputs: {},
+  outputs: {
+    "text.normalized": required<string>(),
   },
   run: (ctx) => ({ "text.normalized": collapseWhitespace(ctx.normalizedText) }),
-};
+});
 
 // ---------------------------------------------------------------------------
 // Operator 2 — URL emitter. Goes first so date emitter can exclude URL ranges.
@@ -126,31 +124,32 @@ const URL_PARAMS: EmitParams = {
   operatorId: "regex.emit.url",
 };
 
-export const regexEmitUrl: ParseOperator = {
+export const regexEmitUrl = defineOperator({
   id: "regex.emit.url",
   cost: 2,
-  signature: {
-    needs: ["text.normalized"],
-    provides: ["spans.url", "trace.regions"],
-    tokens: ["regex", "extract", "url", "link", "href", "address"],
+  tokens: ["regex", "extract", "url", "link", "href", "address"],
+  inputs: {
+    "text.normalized": required<string>(),
+    "trace.regions": optional<readonly TraceRegion[]>(),
+  },
+  outputs: {
+    "spans.url": required<readonly FieldHypothesis[]>(),
+    "trace.regions": required<readonly TraceRegion[]>(),
   },
   run: (_ctx, input) => {
-    const bag = input as Record<string, unknown>;
-    const text = (bag["text.normalized"] as string | undefined) ?? "";
-    const hits = emitFrom(text, URL_PARAMS);
+    const hits = emitFrom(input["text.normalized"], URL_PARAMS);
     return {
       "spans.url": hits,
       "trace.regions": [
-        ...((bag["trace.regions"] as readonly TraceRegion[] | undefined) ?? []),
+        ...(input["trace.regions"] ?? []),
         ...tracesFor(hits, URL_PARAMS.channel, URL_PARAMS.operatorId, "url"),
       ],
     };
   },
-};
+});
 
 // ---------------------------------------------------------------------------
-// Operator 3 — date emitter. Excludes dates that fall inside any URL span;
-// those are slug fragments, not date fields.
+// Operator 3 — date emitter. Excludes dates that fall inside any URL span.
 // ---------------------------------------------------------------------------
 
 const DATE_PARAMS: EmitParams = {
@@ -162,19 +161,6 @@ const DATE_PARAMS: EmitParams = {
   operatorId: "regex.emit.date",
 };
 
-// regexEmitDate is built via `defineOperator`. The `inputs` spec
-// is a single declaration whose property modifiers carry the
-// requiredness: `required<T>()` for channels that gate solver
-// eligibility, `optional<T>()` for contextual reads (e.g. a
-// read-through accumulator). The same modifier drives both the
-// run-body's input type (`?`-property in the bag) and the legacy
-// signature projection — so there is no second ontology to keep in
-// sync. The `?` the run body sees on `input["trace.regions"]` IS the
-// projection: required keys are not `?`, optional keys are.
-//
-// Other primitives keep their hand-authored signatures for now; they
-// remain useful as a side-by-side comparison and can be migrated
-// incrementally.
 export const regexEmitDate = defineOperator({
   id: "regex.emit.date",
   cost: 2,
@@ -182,11 +168,6 @@ export const regexEmitDate = defineOperator({
   inputs: {
     "text.normalized": required<string>(),
     "spans.url": required<readonly FieldHypothesis[]>(),
-    // Read-through accumulator: this operator extends prior regions
-    // rather than replacing them. Optional, so it does NOT gate
-    // solver eligibility — and on the typed input bag it shows up as
-    // a `?`-property, exactly the TypeScript way to say "may or may
-    // not be in scope".
     "trace.regions": optional<readonly TraceRegion[]>(),
   },
   outputs: {
@@ -194,9 +175,8 @@ export const regexEmitDate = defineOperator({
     "trace.regions": required<readonly TraceRegion[]>(),
   },
   run: (_ctx, input) => {
-    const text = input["text.normalized"];
     const urlSpans = input["spans.url"].map((u) => u.span);
-    const raw = emitFrom(text, DATE_PARAMS);
+    const raw = emitFrom(input["text.normalized"], DATE_PARAMS);
     const hits = raw.filter((h) => !containedInAny(h.span, urlSpans));
     return {
       "spans.dated": hits,
@@ -210,11 +190,9 @@ export const regexEmitDate = defineOperator({
 
 // ---------------------------------------------------------------------------
 // Operator 4 — title emitter. Excludes lines that look like a date or a URL,
-// or that sit inside a URL span. Anchored on a leading capital letter.
+// or that sit inside a URL span.
 // ---------------------------------------------------------------------------
 
-// Pattern picks up the line body in capture group 1 so /d gives us the
-// title's own span, not the leading newline.
 const TITLE_PARAMS: EmitParams = {
   field: "title",
   pattern: "(?:^|\\n)([A-Z][^\\n]{9,139})(?=\\n|$)",
@@ -228,39 +206,41 @@ const looksLikeDate = (v: string): boolean =>
   /^\d{4}-\d{2}-\d{2}$/.test(v) || /^[A-Z][a-z]+\s+\d{1,2},\s+\d{4}$/.test(v);
 const looksLikeUrl = (v: string): boolean => /^https?:\/\//.test(v);
 
-export const regexEmitTitle: ParseOperator = {
+export const regexEmitTitle = defineOperator({
   id: "regex.emit.title",
   cost: 2,
-  signature: {
-    needs: ["text.normalized", "spans.url"],
-    provides: ["spans.titled", "trace.regions"],
-    tokens: ["regex", "extract", "title", "headline", "heading", "name"],
+  tokens: ["regex", "extract", "title", "headline", "heading", "name"],
+  inputs: {
+    "text.normalized": required<string>(),
+    "spans.url": required<readonly FieldHypothesis[]>(),
+    "trace.regions": optional<readonly TraceRegion[]>(),
+  },
+  outputs: {
+    "spans.titled": required<readonly FieldHypothesis[]>(),
+    "trace.regions": required<readonly TraceRegion[]>(),
   },
   run: (_ctx, input) => {
-    const bag = input as Record<string, unknown>;
-    const text = (bag["text.normalized"] as string | undefined) ?? "";
-    const urlSpans = ((bag["spans.url"] as readonly FieldHypothesis[] | undefined) ?? []).map((u) => u.span);
-    const raw = emitFrom(text, TITLE_PARAMS);
+    const urlSpans = input["spans.url"].map((u) => u.span);
+    const raw = emitFrom(input["text.normalized"], TITLE_PARAMS);
     const hits = raw.filter(
       (h) => !looksLikeDate(h.value) && !looksLikeUrl(h.value) && !containedInAny(h.span, urlSpans),
     );
     return {
       "spans.titled": hits,
       "trace.regions": [
-        ...((bag["trace.regions"] as readonly TraceRegion[] | undefined) ?? []),
+        ...(input["trace.regions"] ?? []),
         ...tracesFor(hits, TITLE_PARAMS.channel, TITLE_PARAMS.operatorId, "title"),
       ],
     };
   },
-};
+});
 
 // ---------------------------------------------------------------------------
 // Operator 5 — proximity assembly.
 //
-// A row exists where a date sits near a title. The URL is picked from URLs
-// that come *after* the date and before the next date — a forward-window
-// pick avoids the cross-bleed where the previous incident's URL bleeds into
-// the next row.
+// A row exists where a date sits near a title. The URL is picked from
+// URLs that come *after* the date and before the next date — a
+// forward-window pick avoids cross-bleed across rows.
 // ---------------------------------------------------------------------------
 
 const distance = (a: Span, b: Span): number =>
@@ -284,21 +264,24 @@ const buildRow = (
   return { fields, score: avgConf };
 };
 
-export const proximityAssemble: ParseOperator = {
+export const proximityAssemble = defineOperator({
   id: "row.assemble.proximity",
   cost: 3,
-  signature: {
-    needs: ["spans.dated", "spans.titled"],
-    provides: ["rows.assembled"],
-    tokens: ["assemble", "row", "proximity", "segment", "group", "near", "anchor", "window"],
+  tokens: ["assemble", "row", "proximity", "segment", "group", "near", "anchor", "window"],
+  inputs: {
+    "spans.dated": required<readonly FieldHypothesis[]>(),
+    "spans.titled": required<readonly FieldHypothesis[]>(),
+    // URLs are optional: assembly can produce a date+title row without
+    // a URL, so the URL emitter doesn't gate scheduling here.
+    "spans.url": optional<readonly FieldHypothesis[]>(),
+  },
+  outputs: {
+    "rows.assembled": required<readonly RowHypothesis[]>(),
   },
   run: (_ctx, input) => {
-    const bag = input as Record<string, unknown>;
-    const dates = [...((bag["spans.dated"] as readonly FieldHypothesis[] | undefined) ?? [])].sort(
-      (a, b) => a.span[0] - b.span[0],
-    );
-    const titles = (bag["spans.titled"] as readonly FieldHypothesis[] | undefined) ?? [];
-    const urls = (bag["spans.url"] as readonly FieldHypothesis[] | undefined) ?? [];
+    const dates = [...input["spans.dated"]].sort((a, b) => a.span[0] - b.span[0]);
+    const titles = input["spans.titled"];
+    const urls = input["spans.url"] ?? [];
 
     const rows = dates.map((d, i) => {
       const next = dates[i + 1]?.span[0] ?? Number.MAX_SAFE_INTEGER;
@@ -308,43 +291,46 @@ export const proximityAssemble: ParseOperator = {
     });
     return { "rows.assembled": rows };
   },
-};
+});
 
 // ---------------------------------------------------------------------------
 // Operator 6 — schema enforcement / validator pass.
 //
-// Drops rows that fail any AF rowConstraint. The AF reference flows in via
-// the params bag so the operator stays a pure ParseOperator. Rejected rows
-// are converted to typed `Hallucination`s under "hallucinations.collected".
+// Drops rows that fail any AF rowConstraint. The AF reference is captured
+// in the closure rather than flowing through the channel bag. Rejected
+// rows become typed `Hallucination`s under "hallucinations.collected".
 // ---------------------------------------------------------------------------
 
-export const makeEnforceSchema = (af: CsvAF): ParseOperator => ({
-  id: "row.enforce.schema",
-  cost: 1,
-  signature: {
-    needs: ["rows.assembled"],
-    provides: ["rows.validated", "hallucinations.collected"],
+export const makeEnforceSchema = (af: CsvAF): ParseOperator =>
+  defineOperator({
+    id: "row.enforce.schema",
+    cost: 1,
     tokens: ["enforce", "schema", "validate", "filter", "required", "columns", "reject"],
-  },
-  run: (_ctx, input) => {
-    const bag = input as Record<string, unknown>;
-    const rows = (bag["rows.assembled"] as readonly RowHypothesis[] | undefined) ?? [];
-    const kept = rows.filter((r) => af.rowConstraints.every((c) => c(r)));
-    const rejections: readonly Hallucination[] = rows
-      .filter((r) => !af.rowConstraints.every((c) => c(r)))
-      .map<Hallucination>((r) => ({
-        kind: "validator_rejection",
-        operator: "row.enforce.schema",
-        weight: 1,
-        note: `row failed rowConstraints; fields=${Object.keys(r.fields).join(",")}`,
-      }));
-    const prior = (bag["hallucinations.collected"] as readonly Hallucination[] | undefined) ?? [];
-    return {
-      "rows.validated": kept,
-      "hallucinations.collected": [...prior, ...rejections],
-    };
-  },
-});
+    inputs: {
+      "rows.assembled": required<readonly RowHypothesis[]>(),
+      "hallucinations.collected": optional<readonly Hallucination[]>(),
+    },
+    outputs: {
+      "rows.validated": required<readonly RowHypothesis[]>(),
+      "hallucinations.collected": required<readonly Hallucination[]>(),
+    },
+    run: (_ctx, input) => {
+      const rows = input["rows.assembled"];
+      const kept = rows.filter((r) => af.rowConstraints.every((c) => c(r)));
+      const rejections: readonly Hallucination[] = rows
+        .filter((r) => !af.rowConstraints.every((c) => c(r)))
+        .map<Hallucination>((r) => ({
+          kind: "validator_rejection",
+          operator: "row.enforce.schema",
+          weight: 1,
+          note: `row failed rowConstraints; fields=${Object.keys(r.fields).join(",")}`,
+        }));
+      return {
+        "rows.validated": kept,
+        "hallucinations.collected": [...(input["hallucinations.collected"] ?? []), ...rejections],
+      };
+    },
+  });
 
 // Default ecology — does not include enforceSchema, which is AF-specific
 // and constructed by the consumer.

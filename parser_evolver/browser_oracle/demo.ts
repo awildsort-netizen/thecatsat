@@ -75,17 +75,17 @@ for (const f of dist.urlConstructionFragments) {
 banner("Step 4: proposed static operator (authored material only)");
 for (const p of dist.proposedOperators) {
   console.log(`id:             ${p.id}`);
-  console.log(`evidenceFields: ${p.evidenceFields.join(", ")}    // signature.provides is derived from this`);
+  console.log(`evidenceFields: ${p.evidenceFields.join(", ")}    // the lifted operator's io is reflected from the run body, not from this`);
   console.log(`tokens:         ${p.tokens.join(", ")}`);
   console.log(`pattern:        ${p.urlPattern ?? "(literal)"}`);
   console.log(`requestTemplate.url: ${p.requestTemplate.url.slice(0, 100)}…`);
   console.log(`confidence:     ${p.confidence}`);
 }
 
-banner("Step 5: lift proposal to a parser_evolver ParseOperator (signature derived)");
+banner("Step 5: lift proposal to a parser_evolver ParseOperator (io derived)");
 const lifted = liftProposalToOperator(dist.proposedOperators[0]!);
 console.log(`lifted operator id: ${lifted.id}`);
-console.log(`lifted signature:   ${JSON.stringify(lifted.signature)}    // needs/provides reflect the IO of the run-body, not authored fields`);
+console.log(`lifted io:          ${JSON.stringify(lifted.io)}    // reflected from the run-body's typed channel spec, not authored fields`);
 const liftedOut = lifted.run(
   { url: ipoTrace.pageUrl, rawText: "", normalizedText: "" },
   { from: "demo" },

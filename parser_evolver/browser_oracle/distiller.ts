@@ -229,10 +229,11 @@ const proposeOperator = (
   const ok = ev.request.status >= 200 && ev.request.status < 300 ? 1 : 0;
   const coverage = evidenceFields.length / Math.max(1, targets.length);
   const confidence = Math.min(0.95, Math.max(0, ok * (0.3 + 0.4 * useful + 0.4 * coverage)));
-  // Note: `needs`/`provides` are deliberately not set on the proposal.
-  // The lifter derives them from the implementation IO so the proposal
-  // carries only authored material (evidenceFields, requestTemplate,
-  // materialHints) and signature is a downstream projection.
+  // The proposal carries only authored material (evidenceFields,
+  // requestTemplate, materialHints). The lifted operator's `io` is
+  // reflected from its run body's typed channel spec — there is no
+  // place on the proposal where it could disagree with the
+  // implementation.
   return {
     id: operatorIdFor(ev.request, source_id),
     tokens: materialHintsFor(ev.request),
@@ -374,21 +375,21 @@ export function distillTrace(
 }
 
 // ---------------------------------------------------------------------------
-// Lifting a proposal into a real ParseOperator. The run-body is a stub
+// Lifting a proposal into a real ParseOperator. The run body is a stub
 // — it announces what it would fetch and returns a structured input
 // shape that a downstream emitter can hand to the AF. We keep the
 // actual fetch out of this prototype on purpose; the point is that the
 // *operator shape* fits the parser_evolver vocabulary unchanged.
 //
-// The signature is *derived* from the IO declaration below via
-// `defineOperator`. `needs` is empty (the lifted operator reads nothing
-// from upstream — it is a source-style operator that announces a fetch
-// plan) and `provides` is a single proposal-output channel keyed by
-// the proposal id. Per-evidence-field provides are intentionally not
-// claimed here, because this stub does not actually carry the bytes —
-// the surrounding harness must execute the fetch and feed the result
-// back. Lying about provides would defeat the whole point of letting
-// signatures reflect implementation.
+// `io` is reflected from the typed channel spec below via
+// `defineOperator`. `requiredInputs` is empty (this is a source-style
+// operator that reads nothing from upstream) and the single output
+// channel `browser_oracle.proposal` carries the fetch-plan payload.
+// Per-evidence-field outputs are intentionally not claimed here:
+// this stub does not actually carry the bytes — the surrounding
+// harness must execute the fetch and feed the result back. Claiming
+// otherwise would defeat the point of letting IO reflect the
+// implementation.
 // ---------------------------------------------------------------------------
 
 export type ProposalRunOutput = {
@@ -406,9 +407,9 @@ export const liftProposalToOperator = (proposal: ProposedStaticOperator): ParseO
     tokens: proposal.tokens,
     // No required inputs: this is a source-style operator that reads
     // nothing from upstream and announces a fetch plan. An empty
-    // `inputs` object reflects exactly that — and the legacy
-    // `signature.needs` projection comes out as the empty array
-    // because there is nothing required to project.
+    // `inputs` object reflects exactly that — `io.requiredInputs`
+    // comes out as the empty array, which is what the solver should
+    // see for a source-style step.
     inputs: {},
     outputs: {
       "browser_oracle.proposal": required<ProposalRunOutput>(),

@@ -18,7 +18,7 @@ const bag = (tokens: readonly string[]): Embedding =>
     return acc;
   }, new Map());
 
-export const embed = (op: ParseOperator): Embedding => bag(op.signature.tokens);
+export const embed = (op: ParseOperator): Embedding => bag(op.io.tokens);
 
 const dot = (a: Embedding, b: Embedding): number =>
   Array.from(a).reduce((s, [k, v]) => s + v * (b.get(k) ?? 0), 0);
