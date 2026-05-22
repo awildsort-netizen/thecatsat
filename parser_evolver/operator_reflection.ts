@@ -1,95 +1,151 @@
 // Signature-derived operator construction.
 //
-// Design principle: function signatures are the source of truth for what
-// an operator needs and provides. The string arrays in `OperatorSignature`
-// are a *projection* of that signature — useful for the beam solver,
-// for embedding search, and as bytecode-readable metadata — but they
-// should not be hand-authored alongside the implementation. When they
-// are, they drift: a `run` function starts reading a new bag key, or
-// writing one, and the declared `needs`/`provides` lags behind.
+// Design principle: actively seek alignment with the host language.
+// TypeScript already has a vocabulary for "required vs. optional
+// property" — the `?` modifier — and a vocabulary for "what channels
+// does this function consume / produce" — the function's parameter and
+// return types. Inventing a parallel ontology (`needs` / `reads` /
+// `provides` as separate hand-authored string arrays) duplicates what
+// the type system already encodes, and any duplication is a place for
+// drift. Syntax sugar is not just sugar: it collapses entire classes of
+// redundant manual ontology.
 //
-// `defineOperator` is the small helper that closes that loop. The caller
-// declares the operator's IO as typed channel maps — `needs` (required
-// upstream channels), `reads` (optional read-through channels), and
-// `outputs` — and supplies a `run` whose body operates on those typed
-// channels. The signature's `needs` and `provides` are derived from
-// `Object.keys(needs)` / `Object.keys(outputs)` at construction time
-// (cached on the returned operator), so they cannot diverge from the
-// declared IO of the run body.
+// So `defineOperator` takes a single `inputs` channel spec and a single
+// `outputs` channel spec. Every key in `inputs` is a channel the run
+// body may read; every key in `outputs` is a channel the run body must
+// produce. Within `inputs`, channels marked with the `optional<T>()`
+// helper become `?`-properties on the typed input bag — they are
+// readable but not required, and they are NOT projected into the
+// eligibility set the solver uses to schedule the operator. Channels
+// marked with `required<T>()` are required reads and DO gate
+// eligibility. The `?` on the run body's input parameter and the
+// signature projection are the same `?` — there is no second ontology.
 //
-// TypeScript's runtime reflection is limited (no decorators-as-data, no
-// `typeof T` at runtime), so we use a pragmatic shape: the *keys* of the
-// IO specs are the channel names and the *types* at those keys are the
-// channel value shapes. The compiler enforces that the run body's input
-// argument is keyed exactly by `keyof inputs`, and that its return value
-// is keyed exactly by `keyof outputs`. A drift between implementation
-// and declared signature now fails typecheck rather than fails silently.
+// The `signature: { needs, provides, tokens }` object on `ParseOperator`
+// still exists, but it is a *legacy projection* of this reflected
+// shape, computed by `toLegacySignature()` for backward compatibility
+// with the existing solver, embedding layer, and bytecode disassembler.
+// It is no longer the source of truth; the typed channel specs are.
 
 import type { OperatorSignature, ParseContext, ParseOperator } from "./types.js";
 
-// A channel spec is a record whose KEYS are the channel names and whose
-// values are the (compile-time only) shape of bytes flowing through that
-// channel. The runtime values are unused — we only use the keys to
-// derive the signature.
+// ---------------------------------------------------------------------------
+// Channel-spec primitives.
+//
+// A channel spec is a record whose KEYS are channel names. The VALUE at
+// each key is a typed marker: either `required<T>()` (must be in scope
+// before the operator runs) or `optional<T>()` (may be in scope; the
+// run body reads it as `T | undefined`). The marker's runtime form is
+// what lets `defineOperator` partition required vs. optional keys
+// without a second hand-authored array.
+// ---------------------------------------------------------------------------
+
+declare const OPTIONAL_TAG: unique symbol;
+
+// Brand carried only at the type level. The runtime form is a plain
+// object with an OPTIONAL_TAG property; nothing else reads the brand.
+export type Optional<T> = { readonly [OPTIONAL_TAG]: true; readonly __t?: T };
+
+// Helpers the caller uses to declare each channel. `required<T>()`
+// returns a value typed as `T`; `optional<T>()` returns a value typed as
+// `Optional<T>`. Both are write-only sentinels — the runtime values are
+// only used so `Object.keys` and a tag check can partition them.
+export const required = <T>(): T => CHANNEL as unknown as T;
+export const optional = <T>(): Optional<T> => OPTIONAL_SENTINEL as unknown as Optional<T>;
+
+// Sentinel value attached to a channel-spec key. The spec object itself
+// is never read at runtime — only `Object.keys`. `CHANNEL` documents
+// that a caller shouldn't pass a meaningful value.
+export const CHANNEL = Object.freeze({}) as never;
+const OPTIONAL_MARK: unique symbol = Symbol.for("parser_evolver.optional");
+const OPTIONAL_SENTINEL = Object.freeze({ [OPTIONAL_MARK]: true });
+
+const isOptionalMarker = (v: unknown): boolean =>
+  typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[OPTIONAL_MARK] === true;
+
+// ---------------------------------------------------------------------------
+// Type-level projection: turn an inputs spec into the typed bag the run
+// body receives. Keys whose value type extends `Optional<U>` become
+// `?`-properties of type `U`; all other keys are required properties.
+//
+// This is the load-bearing alignment: the `?` the caller sees on
+// `input.someChannel` is the same `?` TypeScript uses for any optional
+// property, because that's exactly what it is.
+// ---------------------------------------------------------------------------
+
 export type ChannelSpec = Readonly<Record<string, unknown>>;
 
-// Typed bag shapes derived from input specs.
-//
-// `needs` are channels the solver must see produced before this operator
-// is eligible — they map to `OperatorSignature.needs`.
-//
-// `reads` are channels the run body may *read* but which the operator
-// does NOT depend on for eligibility (e.g. a read-through accumulator
-// channel an operator also writes back). These are optional in the
-// type bag and are intentionally *not* projected into `signature.needs`.
-//
-// Splitting these two prevents a subtle drift: a hand-authored signature
-// that omits a read-through accumulator passes typecheck but is silently
-// inaccurate. Forcing the call site to list the channel here keeps the
-// implementation honest while still letting the solver gate eligibility
-// on real needs.
-export type InputBag<N extends ChannelSpec, R extends ChannelSpec> = Readonly<
-  { [K in keyof N]: N[K] } & Partial<{ [K in keyof R]: R[K] }>
+type RequiredKeys<I> = { [K in keyof I]: I[K] extends Optional<unknown> ? never : K }[keyof I];
+type OptionalKeys<I> = { [K in keyof I]: I[K] extends Optional<unknown> ? K : never }[keyof I];
+
+export type InputBag<I extends ChannelSpec> = Readonly<
+  { [K in RequiredKeys<I>]: I[K] } & {
+    [K in OptionalKeys<I>]?: I[K] extends Optional<infer U> ? U : never;
+  }
 >;
+
 export type OutputBag<O extends ChannelSpec> = Readonly<{ [K in keyof O]: O[K] }>;
 
-export type DefineOperatorArgs<
-  N extends ChannelSpec,
-  R extends ChannelSpec,
-  O extends ChannelSpec,
-> = {
+// ---------------------------------------------------------------------------
+// defineOperator: a single inputs spec, a single outputs spec. The
+// caller declares optionality via the property modifier-style helper
+// `optional<T>()` rather than via a second slot.
+// ---------------------------------------------------------------------------
+
+export type DefineOperatorArgs<I extends ChannelSpec, O extends ChannelSpec> = {
   readonly id: string;
   readonly cost: number;
   // Tokens still live with the operator — they are the symbolic
   // embedding signal and have no implementation analogue to reflect
-  // off. Co-locating them here keeps `defineOperator` a single
-  // source of truth for everything that lands in the signature.
+  // off. Co-locating them here keeps `defineOperator` a single source
+  // of truth for everything that lands in the signature.
   readonly tokens: readonly string[];
-  // Required upstream channels: gate solver eligibility and are
-  // projected into `signature.needs`.
-  readonly needs: N;
-  // Optional read-through channels: typed for the run body but not
-  // projected into `signature.needs`. Defaults to {} when omitted.
-  readonly reads?: R;
+  readonly inputs: I;
   readonly outputs: O;
-  readonly run: (ctx: ParseContext, input: InputBag<N, R>) => OutputBag<O>;
+  readonly run: (ctx: ParseContext, input: InputBag<I>) => OutputBag<O>;
 };
 
-// Sentinel value attached to a channel-spec key. The spec object itself
-// is never read at runtime — only `Object.keys`. We document that with
-// `CHANNEL` so a caller doesn't accidentally pass a meaningful value.
-export const CHANNEL = Object.freeze({}) as never;
+// Partition the inputs spec at runtime. Required keys become the
+// eligibility set; the union (required ∪ optional) is the full read
+// set, used only when callers ask for it explicitly via `inputKeys()`.
+const partitionInputs = (inputs: ChannelSpec): { requiredInputs: readonly string[]; optionalInputs: readonly string[] } => {
+  const required: string[] = [];
+  const optional: string[] = [];
+  for (const [k, v] of Object.entries(inputs)) {
+    (isOptionalMarker(v) ? optional : required).push(k);
+  }
+  return { requiredInputs: Object.freeze(required), optionalInputs: Object.freeze(optional) };
+};
 
-// Derive a signature from input/output channel keys. Exposed so other
-// modules (the browser_oracle proposal lifter, for example) can produce
-// the same projection without re-implementing the rule.
-export const deriveSignature = (
-  needs: ChannelSpec,
-  outputs: ChannelSpec,
+// ---------------------------------------------------------------------------
+// Reflected views.
+//
+// The reflected operator carries the partition explicitly so other
+// modules can query "what does this operator require?" / "what does it
+// read optionally?" / "what does it produce?" without re-parsing the
+// inputs spec. These are projections of the spec, not authored fields.
+// ---------------------------------------------------------------------------
+
+export type ReflectedOperator = ParseOperator & {
+  readonly reflected: {
+    readonly requiredInputs: readonly string[];
+    readonly optionalInputs: readonly string[];
+    readonly outputs: readonly string[];
+  };
+};
+
+// Legacy adapter: emit the `{needs, provides, tokens}` shape the
+// existing solver / embedding layer / bytecode disassembler consume.
+// `needs` is the required-inputs set (only required reads gate
+// scheduling); `provides` is the outputs set. This is a *projection*
+// for backward compatibility — not first-class vocabulary.
+export const toLegacySignature = (
+  requiredInputs: readonly string[],
+  outputs: readonly string[],
   tokens: readonly string[],
 ): OperatorSignature => ({
-  needs: Object.freeze(Object.keys(needs)),
-  provides: Object.freeze(Object.keys(outputs)),
+  needs: requiredInputs,
+  provides: outputs,
   tokens,
 });
 
@@ -97,18 +153,22 @@ export const deriveSignature = (
 // declaration. The signature is computed once at construction and frozen
 // onto the operator; it cannot drift because the run body's TypeScript
 // type forces the same keys.
-export const defineOperator = <
-  N extends ChannelSpec,
-  R extends ChannelSpec,
-  O extends ChannelSpec,
->(
-  args: DefineOperatorArgs<N, R, O>,
-): ParseOperator => {
-  const signature = deriveSignature(args.needs, args.outputs, args.tokens);
+export const defineOperator = <I extends ChannelSpec, O extends ChannelSpec>(
+  args: DefineOperatorArgs<I, O>,
+): ReflectedOperator => {
+  const { requiredInputs, optionalInputs } = partitionInputs(args.inputs);
+  const outputs = Object.freeze(Object.keys(args.outputs));
+  const signature = toLegacySignature(requiredInputs, outputs, args.tokens);
   // The bag the solver passes in is untyped (`unknown`); we narrow it
   // to the declared shape at the boundary. The narrowing is a single
   // cast at the edge — internal code stays typed.
   const run: ParseOperator["run"] = (ctx, input) =>
-    args.run(ctx, input as InputBag<N, R>) as unknown;
-  return { id: args.id, cost: args.cost, signature, run };
+    args.run(ctx, input as InputBag<I>) as unknown;
+  return {
+    id: args.id,
+    cost: args.cost,
+    signature,
+    run,
+    reflected: { requiredInputs, optionalInputs, outputs },
+  };
 };

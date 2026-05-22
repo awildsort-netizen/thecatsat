@@ -6,6 +6,7 @@
 
 import { companyUpdatesAF, summarisePressure } from "./af.js";
 import { PRIMITIVES, makeEnforceSchema, regexEmitDate } from "./operators.js";
+import type { ReflectedOperator } from "./operator_reflection.js";
 import { makeBeamSolver } from "./solver.js";
 import type { FieldHypothesis, ParseContext, RowHypothesis } from "./types.js";
 
@@ -148,23 +149,36 @@ assert(
   cells.every((c) => c.traceRegionId === undefined || traces.some((t) => t.id === c.traceRegionId)),
 );
 
-// --- defineOperator: signature is derived from IO, not hand-authored -------
-// `regexEmitDate` is built via `defineOperator`; the assertions below
-// witness that its `signature.needs` / `signature.provides` line up with
-// its declared IO channels (not with a manually-maintained string list),
-// and that the solver picks it up as a normal `ParseOperator` — proving
-// that signature-by-reflection participates in composition.
+// --- defineOperator: signature reflected from typed IO, no parallel ontology
+// `regexEmitDate` is built via `defineOperator`. The `inputs` spec is a
+// single declaration whose property-modifier-style helpers (`required<T>()`
+// / `optional<T>()`) drive both the run-body's input type (`?`-property
+// for optional channels) and the legacy `signature.needs` / `signature.provides`
+// projection. The assertions below witness that:
+//
+//   (a) only required-input keys reach `signature.needs` — so the
+//       optional read-through channel `trace.regions` is NOT in needs;
+//   (b) the reflected view exposes the optional partition explicitly;
+//   (c) the operator participates in the solver's top creature unchanged.
+const reflectedDate: ReflectedOperator = regexEmitDate;
 assert(
-  "regexEmitDate.signature.needs is derived from declared needs channels",
+  "regexEmitDate.signature.needs reflects only required inputs (trace.regions is optional and excluded)",
   ["text.normalized", "spans.url"].every((k) => regexEmitDate.signature.needs.includes(k)) &&
+    !regexEmitDate.signature.needs.includes("trace.regions") &&
     regexEmitDate.signature.needs.length === 2,
   `needs=${regexEmitDate.signature.needs.join(",")}`,
 );
 assert(
-  "regexEmitDate.signature.provides is derived from declared output channels",
+  "regexEmitDate.signature.provides reflects all declared output channels",
   ["spans.dated", "trace.regions"].every((k) => regexEmitDate.signature.provides.includes(k)) &&
     regexEmitDate.signature.provides.length === 2,
   `provides=${regexEmitDate.signature.provides.join(",")}`,
+);
+assert(
+  "reflected view surfaces the optional-input partition (trace.regions is optional)",
+  reflectedDate.reflected?.optionalInputs.includes("trace.regions") === true &&
+    reflectedDate.reflected?.requiredInputs.includes("trace.regions") === false,
+  `optional=${reflectedDate.reflected?.optionalInputs.join(",")}; required=${reflectedDate.reflected?.requiredInputs.join(",")}`,
 );
 const dateChainTop = top?.genes.some((g) => g.operatorId === "regex.emit.date");
 assert(

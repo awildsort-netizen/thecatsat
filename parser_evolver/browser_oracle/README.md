@@ -56,11 +56,12 @@ loop is the distillation, operator synthesis, and remembered absence.
      - emits a **`ProposedStaticOperator`** per minimal request,
        carrying only authored material (`evidenceFields`,
        `requestTemplate`, `materialHints`, `tokens`, `cost`). The
-       `needs` / `provides` signature is **derived** at
-       `liftProposalToOperator` time from the lifted run-body's IO
-       shape via [`defineOperator`](../operator_reflection.ts) — it is
-       not hand-authored on the proposal, because that would duplicate
-       (and inevitably drift from) the implementation. See
+       legacy `signature: {needs, provides, tokens}` is **derived** at
+       `liftProposalToOperator` time from the lifted run body's typed
+       `inputs`/`outputs` via [`defineOperator`](../operator_reflection.ts).
+       The proposal does not carry an explicit `needs`/`provides`
+       array, because that would duplicate (and inevitably drift
+       from) the lifted IO. See
        [`../docs/signatures_first.md`](../docs/signatures_first.md).
        For Next.js route-data fetches the operator id is the
        well-known `next.route_payload.fetch`; otherwise we synthesise

@@ -36,7 +36,7 @@ import type {
   ResourceType,
 } from "./types.js";
 import type { ParseOperator } from "../types.js";
-import { CHANNEL, defineOperator } from "../operator_reflection.js";
+import { defineOperator, required } from "../operator_reflection.js";
 
 export function loadTrace(path: string): BrowserOracleTrace {
   return JSON.parse(readFileSync(path, "utf8")) as BrowserOracleTrace;
@@ -404,9 +404,14 @@ export const liftProposalToOperator = (proposal: ProposedStaticOperator): ParseO
     id: proposal.id,
     cost: proposal.cost,
     tokens: proposal.tokens,
-    needs: {},
+    // No required inputs: this is a source-style operator that reads
+    // nothing from upstream and announces a fetch plan. An empty
+    // `inputs` object reflects exactly that — and the legacy
+    // `signature.needs` projection comes out as the empty array
+    // because there is nothing required to project.
+    inputs: {},
     outputs: {
-      "browser_oracle.proposal": CHANNEL as ProposalRunOutput,
+      "browser_oracle.proposal": required<ProposalRunOutput>(),
     },
     run: (_ctx, _input) => ({
       "browser_oracle.proposal": {

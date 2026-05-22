@@ -28,7 +28,7 @@ import type {
   Span,
   TraceRegion,
 } from "./types.js";
-import { CHANNEL, defineOperator } from "./operator_reflection.js";
+import { defineOperator, optional, required } from "./operator_reflection.js";
 
 // ---------------------------------------------------------------------------
 // Small helpers — pure, no for-loops.
@@ -162,33 +162,40 @@ const DATE_PARAMS: EmitParams = {
   operatorId: "regex.emit.date",
 };
 
-// regexEmitDate is built via `defineOperator` so that `signature.needs`
-// and `signature.provides` are derived from the typed `needs`/`outputs`
-// channel specs below — the implementation cannot drift from the
-// declared signature, because the same keys flow into both. Other
-// primitives keep their hand-authored signatures for now; they remain
-// useful as a comparison and can be migrated incrementally.
-export const regexEmitDate: ParseOperator = defineOperator({
+// regexEmitDate is built via `defineOperator`. The `inputs` spec
+// is a single declaration whose property modifiers carry the
+// requiredness: `required<T>()` for channels that gate solver
+// eligibility, `optional<T>()` for contextual reads (e.g. a
+// read-through accumulator). The same modifier drives both the
+// run-body's input type (`?`-property in the bag) and the legacy
+// signature projection — so there is no second ontology to keep in
+// sync. The `?` the run body sees on `input["trace.regions"]` IS the
+// projection: required keys are not `?`, optional keys are.
+//
+// Other primitives keep their hand-authored signatures for now; they
+// remain useful as a side-by-side comparison and can be migrated
+// incrementally.
+export const regexEmitDate = defineOperator({
   id: "regex.emit.date",
   cost: 2,
   tokens: ["regex", "extract", "date", "iso", "calendar", "month"],
-  needs: {
-    "text.normalized": CHANNEL as string,
-    "spans.url": CHANNEL as readonly FieldHypothesis[],
-  },
-  reads: {
+  inputs: {
+    "text.normalized": required<string>(),
+    "spans.url": required<readonly FieldHypothesis[]>(),
     // Read-through accumulator: this operator extends prior regions
-    // rather than replacing them. Listed as `reads` so it is typed for
-    // the run body without becoming a solver-eligibility need.
-    "trace.regions": CHANNEL as readonly TraceRegion[],
+    // rather than replacing them. Optional, so it does NOT gate
+    // solver eligibility — and on the typed input bag it shows up as
+    // a `?`-property, exactly the TypeScript way to say "may or may
+    // not be in scope".
+    "trace.regions": optional<readonly TraceRegion[]>(),
   },
   outputs: {
-    "spans.dated": CHANNEL as readonly FieldHypothesis[],
-    "trace.regions": CHANNEL as readonly TraceRegion[],
+    "spans.dated": required<readonly FieldHypothesis[]>(),
+    "trace.regions": required<readonly TraceRegion[]>(),
   },
   run: (_ctx, input) => {
-    const text = input["text.normalized"] ?? "";
-    const urlSpans = (input["spans.url"] ?? []).map((u) => u.span);
+    const text = input["text.normalized"];
+    const urlSpans = input["spans.url"].map((u) => u.span);
     const raw = emitFrom(text, DATE_PARAMS);
     const hits = raw.filter((h) => !containedInAny(h.span, urlSpans));
     return {

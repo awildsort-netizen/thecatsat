@@ -19,11 +19,16 @@ why the typed `Hallucination` artifacts are shaped the way they are.
   hallucination artifacts: `Hallucination`, `HallucinationKind`,
   `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader design hook.
 - `operator_reflection.ts` — `defineOperator(...)` builds a
-  `ParseOperator` whose `signature.needs`/`signature.provides` is
-  **derived** from the typed `needs`/`outputs` channel specs of the run
-  body. Function signatures are the source of truth; the string-arrays
-  in `OperatorSignature` are a projection. See
-  [`docs/signatures_first.md`](docs/signatures_first.md).
+  `ParseOperator` from a single typed `inputs`/`outputs` channel
+  spec. Channels marked `required<T>()` gate solver eligibility;
+  channels marked `optional<T>()` are typed as `?`-properties on
+  the run body's input bag (the same `?` TypeScript uses for any
+  optional property) and are NOT projected into eligibility. The
+  legacy `signature: {needs, provides, tokens}` shape is preserved
+  via a `toLegacySignature` adapter so the existing solver, embedding,
+  and bytecode-disassembler code consume it unchanged — but it is
+  now a derived projection of the typed IO, not first-class
+  vocabulary. See [`docs/signatures_first.md`](docs/signatures_first.md).
 - `embedding.ts` — symbolic operator embedding (token-bag cosine). Used by
   the solver to prune extensions by similarity to *remaining* AF needs.
 - `operators.ts` — five primitives plus an AF-bound enforcer:
