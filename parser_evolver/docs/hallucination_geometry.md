@@ -247,6 +247,138 @@ keep ending up as the patch site. Flow regression — Riordan-style or
 otherwise — can grow on top of this without touching existing
 operators, exactly because the geometry is already being recorded.
 
+## Masks, padding, and noncoding regions
+
+Hallucinations are not the only typed non-emitting material in a run.
+A mask is also a kind of *not-yet-claim* — a region the solver has
+explicitly declined to collapse. Padding is structural spacing that
+keeps shapes alignable without asserting content. Both are quiet, both
+look empty to a casual reader, and both are doing real work.
+
+The framing this doc adopts: **masks and padding are space for breath**
+— preserved capacity for relation without premature collapse. Masked
+uncertainty is healthier than fabricated certainty. Padding preserves
+the topology of the field (positions, neighbors, distances) without
+pretending we know what sits in the slot. If a `validator_rejection`
+is a recorded mismatch, a mask is the *refusal* to record a mismatch
+where there is no evidence to mismatch against. The first commits to a
+shape and is wrong; the second leaves the shape open so a later
+operator can land there honestly.
+
+### Junk DNA / noncoding regions
+
+In biology, "junk DNA" is a name that aged badly. Noncoding regions
+are not necessarily useless — they serve as:
+
+- **archive** — sequence preserved past its original use,
+- **scaffold** — structural spacing that holds coding regions in the
+  right topology,
+- **buffer** — absorbs mutation pressure that would otherwise land on
+  coding sequence,
+- **switchboard** — regulatory elements that decide when coding
+  regions express,
+- **scar tissue** — frozen record of past repairs and integrations,
+- **latent option space** — material that is currently silent but
+  available to be co-opted (exapted) into new function,
+- **evolutionary scratchpad** — variation can accumulate here cheaply
+  because nothing depends on it yet.
+
+The lesson is not that all silent regions are valuable. It is that
+*silence alone does not tell you which*. Deciding requires keeping the
+region around long enough for time and context to disambiguate.
+
+### Viral DNA
+
+Genomes also carry imported fragments — endogenous retroviruses,
+transposable elements, horizontally acquired sequence. These are not
+"the organism's own design." They can be:
+
+- **dormant** — present but not expressed,
+- **beneficial** — exapted into placental development, immune
+  regulation, gene expression control,
+- **pathological** — actively breaking nearby function,
+- **plaque-forming** — accumulating into structures that distort
+  surrounding flow,
+- **later exapted** — silent for a long time, then recruited into a
+  useful role by a context that did not exist when they arrived.
+
+This is the right shape for thinking about **failed operator
+fragments, partial imports, and outside-sourced material** in the
+solver: they are not strictly self, and they are not strictly waste.
+
+### Mapping into parser_evolver
+
+| Biology | parser_evolver |
+| --- | --- |
+| Coding region | emitter that contributed a backed cell |
+| Noncoding region | masked slot — typed-empty, topology preserved |
+| Structural spacing | padding between trace regions; alignment-only material |
+| Scar tissue | repair traces accumulated on an operator |
+| Plaque | semantic plaque (maladaptive repair sediment) |
+| Latent / dormant gene | operator present in the library, currently unused |
+| Viral fragment | imported operator or pre-pass artifact whose provenance is external |
+| Developmental history | `TraceRegion` log across runs |
+| Morphogen / regulatory field | AF pressure (which columns still need provides, which validators still fail) |
+
+A masked slot is not a hole; it is **typed non-emitting material**. A
+404 snapshot is not absence; it is *recorded* absence with a
+provenance. A shell-only fetch is not failure; it is a snapshot whose
+class is known. These are noncoding regions of the run — they should
+be addressable, comparable across runs, and available as input to
+future operators, not erased.
+
+## Do not delete all failure
+
+The design ethic that follows from the analogy:
+
+- **Quarantine** failure rather than discard it. A failed fetch, a
+  rejected row, a low-coverage region is typed material with a
+  location.
+- **Annotate** it with what is known: kind, weight, span, source,
+  reachability class.
+- **Compress** it as it ages, but keep the shape. Repair traces fuse;
+  plaque metrics summarize; the location stays addressable.
+- **Let time decide** whether a quiet region is junk, virus, scaffold,
+  plaque, or seed. The same fragment can move between categories as
+  the surrounding field changes — a dormant operator becomes useful
+  once a new AF arrives; a tolerated guard becomes plaque once a
+  cleaner upstream lands.
+
+Deleting all failure deletes the substrate that later exaptation would
+have worked on. The cost of keeping typed non-emitting material around
+is small (it does not emit); the cost of having thrown it away is that
+the next operator proposal has nothing to learn from.
+
+### What this means for future automated monitoring
+
+The monitor pre-pass already escalates honestly: shell-only snapshots
+become `needs-rendered-fetch`, 404 mirrors become `flag-for-review`,
+missing evidence lowers `confidence` rather than fabricating a row.
+The framing here extends that ethic forward. Failed fetches,
+shell-only snapshots, 404 mirrors, and missing-evidence regions are
+**typed non-emitting material** that should be preserved across runs
+as first-class artifacts, not collapsed into "we tried, nothing
+happened." Kept around, they later guide:
+
+- **rendered-fetch decisions** — a persistent shell-only region is a
+  morphogen signal for a headless-rendered text emitter,
+- **source expansion** — repeated 404s at a known URL family are a
+  signal to grow the source set (mirrors, archive lookups, official
+  status feeds),
+- **operator proposals** — `FailurePressure.propose()` reads better
+  when the failure has been recorded as a region with provenance, not
+  as a one-shot error code,
+- **plaque vs scaffold discrimination** — a silent region that has
+  been quiet across many runs without distorting nearby flow is
+  scaffold; one that is bending paths around it is plaque; only the
+  preserved history distinguishes them.
+
+Concretely: digest rows, trace regions, snapshot manifests, and
+hallucination artifacts already carry enough type to play this role.
+The instruction is to keep treating them as material — addressable,
+comparable, exaptable — and not to compress them away just because
+they did not emit content this run.
+
 ## What this changes about the seed (and what it doesn't)
 
 Nothing in this document requires code changes today. The seed already
