@@ -247,3 +247,72 @@ Concretely, the next PR should add:
   as `tests/test_transform_litmus.py`).
 
 That is the scope. Anything more is plaque.
+
+## First scaffold (implemented)
+
+The first scaffold lives in
+[`geometry/bubble_lifecycle.py`](../geometry/bubble_lifecycle.py) and
+its driver
+[`experiments/bubble_lifecycle.py`](../experiments/bubble_lifecycle.py).
+It deliberately does **not** add a new `CoordinateView`, change the
+solver loop, or claim positive results on the real suite. It adds the
+smallest set of types and tests the framing needs to be talked about
+in code rather than in prose:
+
+- **`CollisionSeed`** — picks the highest-strain variable from a
+  per-variable strain vector (the same residual `transform_litmus`
+  already replays) and records local-neighborhood concentration.
+- **`AddressBubble`** — an interior index set (top-`radius+1` strain
+  ranks) plus a boundary set (the next-out ranks), built off a single
+  strain snapshot.
+- **`contains(bubble, item)`** — three cheap containment tests in one
+  call: rank distance to the seed center, top-k strain membership,
+  boundary membership with a numeric boundary margin
+  (interior_min strain minus boundary_max strain).
+- **`classify_static`** — single-snapshot lifecycle: `pruned`, `seed`,
+  `leaky`, or `inflated`.
+- **`classify_lifecycle`** — multi-snapshot lifecycle: `pruned`,
+  `stable`, `leaky`, `plaque_risk`, `merged`, or falls back to
+  `inflated`. Inputs are a bubble and a list of per-variable strain
+  vectors over time (the demo derives one by replaying the
+  `RiordanProbe` decisions).
+- The driver prints a containment/lifecycle table for three cases —
+  one real-suite case and two clearly-labelled synthetic toy traces —
+  followed by an honest interpretation paragraph.
+
+Reading the demo output as of the first run:
+
+| case                              | static     | trace        |
+| --------------------------------- | ---------- | ------------ |
+| real:3sat_v12_c42_s2/sierpinski   | `leaky`    | `merged`     |
+| toy:stable                        | `inflated` | `stable`     |
+| toy:plaque                        | `inflated` | `plaque_risk`|
+
+The real-suite row consistent with PR #9's negative finding: the
+existing transforms do not produce a stable interior, the bubble's
+edge is leaky, and the strain ranking churns into the boundary
+(classifier reads that as `merged`, since boundary indices end up in
+the top-strain set). The two `toy:*` rows are positive/negative
+controls for the classifier itself, not evidence about SAT — they show
+the lifecycle vocabulary picks up the regimes the design doc named.
+
+### What remains undone
+
+This scaffold is *the address-and-edge half*. It does not yet:
+
+- propose an inflation step (no new `CoordinateView`, no extra
+  addressable cell injected between a colliding pair),
+- implement merge or prune as transformations — only as
+  *classifications* of an already-evolved trace,
+- couple the lifecycle log to the `parser_evolver` developmental
+  trace, or to `browser_oracle`,
+- run a sweep over the full 22-instance suite. The demo picks one
+  real-suite instance/view by residual strain to keep the table
+  short; a sweep is the natural next step once an actual inflation
+  transform exists for the litmus to score.
+
+The pacing guardrail above still holds: the *next* PR after this one
+should add a single inflation transform (the bubble-seed view) and
+re-run the PR #9 litmus on the same suite. If `localized_but_stable`
+remains empty, the framing has *also* failed empirically, and that
+will be its own honest finding.
