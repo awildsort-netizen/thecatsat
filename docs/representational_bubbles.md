@@ -316,3 +316,94 @@ should add a single inflation transform (the bubble-seed view) and
 re-run the PR #9 litmus on the same suite. If `localized_but_stable`
 remains empty, the framing has *also* failed empirically, and that
 will be its own honest finding.
+
+## Pressure gauge / tuning layer (implemented)
+
+The lifecycle scaffold answered *what state is this bubble in?* It did
+not answer *should we stabilize, split, merge, or prune?* and it did
+not distinguish "strain is rising because the bubble is doing
+diagnostic work" from "strain is rising because the chart is off-phase
+and the amplification is destructive". That is what
+[`geometry/bubble_tuning.py`](../geometry/bubble_tuning.py) adds.
+
+The gauge reads four cheap numbers off a bubble + a strain trace:
+
+- **interior mean / std** — variance *inside* the bubble; high
+  within-interior std is the sub-bubble cue,
+- **off-bubble strain** — share of strain held outside interior ∪
+  boundary (leak indicator),
+- **boundary stability** — how much the top-(interior ∪ boundary) set
+  turns over across the trace.
+
+These collapse into a factored **pressure label** that replaces the
+old judgmental `amplified_pathology` framing:
+
+| label                       | informal reading                                       |
+| --------------------------- | ------------------------------------------------------ |
+| `diffuse_pressure`          | low std + nontrivial mean → nothing is separating yet  |
+| `diagnostic_amplification`  | std up + stable boundary + low off-bubble strain       |
+| `destructive_amplification` | std up + boundary churns OR strain leaks off-bubble    |
+| `strain_amplified`          | catch-all bland sublabel; "rising but unclassified"    |
+
+A small declarative rule table (`RULES` in `bubble_tuning.py`)
+promotes the pressure reading into a **`TuningVerdict`** — one of
+`stabilize`, `split`, `merge`, `prune`, `hold`. The table is the only
+place control flow lives: each law is a (name, predicate, action,
+explanation) record, the first matching law wins, and a default `hold`
+catches the rest. That is the entire classifier — there is no big
+if/elif tree and no manual loop over snapshots; means, stds, shares,
+and stabilities are computed with comprehensions + `statistics.pstdev`.
+
+The four laws that actually fire on the toy + real cases:
+
+- `strain_dissipated` → `prune` (total mean ≈ 0),
+- `off_bubble_dominant` → `merge` (off-bubble share ≥ 0.60),
+- `diffuse_pressure` → `hold` (low std/mean ratio),
+- `high_interior_variance` → `split` (interior std ≥ 0.50 × interior mean),
+- `destructive_amplification` → `hold` (std up but edge churns/leaks),
+- `stable_diagnostic_bubble` → `stabilize` (diagnostic + clean edge + tight interior).
+
+`hierarchy_for(bubble, pressure)` adds one extra structural field: on
+a `split` verdict the top-half-by-strain slice of the current interior
+is returned as the proposed sub-bubble. That is the entire bubble
+hierarchy: not a new framework, just the cut a split implies.
+
+A separate **`PhaseReadout`** classifies a *family* of transform
+observations (e.g. raw / spectral / pascal / signed / sierpinski from
+`riordan_probe`) into `aligned` / `off_phase` / `over_smoothed` /
+`needs_another_layer`. It is **exploratory**: the doc does *not* claim
+Riordan operators help broadly, only that the readout is the right
+shape of question to ask when the gauge says "destructive" and we want
+to know whether the family is off-phase or the family has collapsed.
+
+Reading the demo output as of the first run:
+
+| case                              | pressure                    | action      |
+| --------------------------------- | --------------------------- | ----------- |
+| real:3sat_v12_c42_s2/sierpinski   | `destructive_amplification` | `hold`      |
+| toy:diffuse                       | `diffuse_pressure`          | `hold`      |
+| toy:diagnostic                    | `diagnostic_amplification`  | `stabilize` |
+| toy:destructive                   | `destructive_amplification` | `hold`      |
+
+The toy controls land on their predicted regimes. The real-suite row
+is consistent with PR #9/#11: the existing transforms do not nucleate
+a clean diagnostic bubble on this instance, the gauge calls the
+amplification destructive (strain leaks off-bubble; the edge stability
+is middling), and the rule table refuses to stabilize off-phase — the
+"hold" verdict is the right *non-action* for the regime.
+
+### What this layer is not
+
+- It does **not** change the solver loop. No flips are gated on the
+  verdict; the verdict is advisory.
+- It does **not** add a new `CoordinateView`. The pacing guardrail
+  above still applies; that is the *next* PR.
+- It does **not** claim a positive empirical result on SAT. The
+  diagnostic vs. destructive split is a frame for *interpreting* what
+  the existing transforms produce, not evidence they produce stable
+  bubbles. The honest reading on the real suite remains: no stable
+  interiors yet.
+- It does **not** claim Riordan family membership helps broadly. The
+  phase readout is a hook for a future transform that *is* designed to
+  nucleate bubbles; on the current suite the readout is wherever it
+  lands and should be read as exploratory.
