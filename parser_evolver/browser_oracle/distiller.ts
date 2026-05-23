@@ -36,7 +36,6 @@ import type {
   ResourceType,
 } from "./types.js";
 import type { ParseOperator } from "../types.js";
-import { defineOperator, required } from "../operator_reflection.js";
 
 export function loadTrace(path: string): BrowserOracleTrace {
   return JSON.parse(readFileSync(path, "utf8")) as BrowserOracleTrace;
@@ -381,15 +380,14 @@ export function distillTrace(
 // actual fetch out of this prototype on purpose; the point is that the
 // *operator shape* fits the parser_evolver vocabulary unchanged.
 //
-// `io` is reflected from the typed channel spec below via
-// `defineOperator`. `requiredInputs` is empty (this is a source-style
-// operator that reads nothing from upstream) and the single output
-// channel `browser_oracle.proposal` carries the fetch-plan payload.
-// Per-evidence-field outputs are intentionally not claimed here:
-// this stub does not actually carry the bytes — the surrounding
+// The lifted operator is declared as
+// `ParseOperator<Record<string, never>, { "browser_oracle.proposal": ProposalRunOutput }>`:
+// no required inputs (it's source-style), one output channel carrying
+// the fetch-plan payload. Per-evidence-field outputs are intentionally
+// not claimed — this stub does not carry the bytes; the surrounding
 // harness must execute the fetch and feed the result back. Claiming
-// otherwise would defeat the point of letting IO reflect the
-// implementation.
+// otherwise would defeat the point of letting the function signature
+// be the operator's signature.
 // ---------------------------------------------------------------------------
 
 export type ProposalRunOutput = {
@@ -400,27 +398,27 @@ export type ProposalRunOutput = {
   readonly note: string;
 };
 
-export const liftProposalToOperator = (proposal: ProposedStaticOperator): ParseOperator =>
-  defineOperator({
-    id: proposal.id,
-    cost: proposal.cost,
-    tokens: proposal.tokens,
-    // No required inputs: this is a source-style operator that reads
-    // nothing from upstream and announces a fetch plan. An empty
-    // `inputs` object reflects exactly that — `io.requiredInputs`
-    // comes out as the empty array, which is what the solver should
-    // see for a source-style step.
-    inputs: {},
-    outputs: {
-      "browser_oracle.proposal": required<ProposalRunOutput>(),
+export const liftProposalToOperator = (
+  proposal: ProposedStaticOperator,
+): ParseOperator<
+  Record<string, never>,
+  { "browser_oracle.proposal": ProposalRunOutput }
+> => ({
+  id: proposal.id,
+  cost: proposal.cost,
+  tokens: proposal.tokens,
+  run: (_ctx, _input) => ({
+    "browser_oracle.proposal": {
+      proposalId: proposal.id,
+      requestTemplate: proposal.requestTemplate,
+      evidenceFields: proposal.evidenceFields,
+      upstream: _input,
+      note: "Lifted from a browser-oracle TraceDistillation. Static fetch is not executed inside parser_evolver; the surrounding harness must perform the request and feed bytes back as ParseContext.rawText.",
     },
-    run: (_ctx, _input) => ({
-      "browser_oracle.proposal": {
-        proposalId: proposal.id,
-        requestTemplate: proposal.requestTemplate,
-        evidenceFields: proposal.evidenceFields,
-        upstream: _input,
-        note: "Lifted from a browser-oracle TraceDistillation. Static fetch is not executed inside parser_evolver; the surrounding harness must perform the request and feed bytes back as ParseContext.rawText.",
-      },
-    }),
-  });
+  }),
+  channels: {
+    requiredInputs: [],
+    optionalInputs: [],
+    outputs: ["browser_oracle.proposal"],
+  },
+});

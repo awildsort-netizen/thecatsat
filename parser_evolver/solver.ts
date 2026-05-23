@@ -13,6 +13,7 @@
 // total score break by the last gene's similarity to the AF tokens.
 
 import { fit, similarity, embed } from "./embedding.js";
+import { signatureOf } from "./operator_reflection.js";
 import type {
   CsvAF,
   Gene,
@@ -139,7 +140,7 @@ const availableChannels = (
 ): ReadonlySet<string> =>
   genes.reduce<Set<string>>((set, g) => {
     const op = ops.get(g.operatorId);
-    op?.io.outputs.forEach((p) => set.add(p));
+    if (op) signatureOf(op).outputs.forEach((p) => set.add(p));
     return set;
   }, new Set<string>(["text.normalized"]));
 
@@ -169,14 +170,16 @@ const eligibleExtensions = (
   topK: number,
 ): readonly { op: ParseOperator; sim: number }[] => {
   const tokens = remainingTokens(af, channels);
-  const saturation = (op: ParseOperator): number =>
-    op.io.outputs.length === 0
+  const saturation = (op: ParseOperator): number => {
+    const outs = signatureOf(op).outputs;
+    return outs.length === 0
       ? 0
-      : op.io.outputs.every((p) => channels.has(p))
+      : outs.every((p) => channels.has(p))
         ? 0.01
         : 1;
+  };
   return ops
-    .filter((op) => op.io.requiredInputs.every((n) => channels.has(n)))
+    .filter((op) => signatureOf(op).requiredInputs.every((n) => channels.has(n)))
     .map((op) => ({ op, sim: fit(op, tokens) * saturation(op) }))
     .sort((a, b) => b.sim - a.sim)
     .slice(0, topK);
@@ -203,7 +206,10 @@ const candidateTieKey = (
 ): number => {
   const last = c.genes[c.genes.length - 1];
   const op = last && ops.get(last.operatorId);
-  return op ? similarity(embed(op), embed({ ...op, io: { ...op.io, tokens } })) : 0;
+  // Embed the operator against `tokens` by constructing an alternate
+  // view where `tokens` replaces the operator's own — a one-off
+  // probe used only for tie-breaking.
+  return op ? similarity(embed(op), embed({ ...op, tokens })) : 0;
 };
 
 export const makeBeamSolver = (cfg: Partial<BeamConfig> = {}): Solver => {

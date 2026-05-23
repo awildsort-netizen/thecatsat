@@ -91,30 +91,24 @@ export type FailurePressure = {
 };
 
 // ---------------------------------------------------------------------------
-// Operators: tendencies advertised by their typed IO.
+// Operators.
 //
-// `io` is the single shape every consumer reads. `requiredInputs` gates
-// solver eligibility; `optionalInputs` are contextual reads (typed as
-// `?`-properties on the run body's input bag); `outputs` are the
-// channels the run body produces; `tokens` are the symbolic embedding
-// signal. The `defineOperator` helper builds these by reflecting on a
-// typed channel spec — but hand-authored operators speak exactly the
-// same vocabulary, so there's only one ontology in the system.
+// `ParseOperator` is defined in `operator_reflection.ts`, generic over
+// the run function's type. The function signature IS the operator's
+// signature — required vs. optional inputs ride on the `?` modifier
+// of the input parameter's type; outputs are the keys of the return
+// type. The minimum value-level residue (channel-name arrays + tokens)
+// lives on the operator only because TypeScript types are erased at
+// runtime and the solver needs *some* way to read them; the solver
+// accesses it through the `signatureOf(op)` view rather than storing
+// it as authoritative state.
+//
+// Importing the type here would create a circular import, so this
+// header just documents the location. See `operator_reflection.ts`.
 // ---------------------------------------------------------------------------
 
-export type OperatorIO = {
-  readonly requiredInputs: readonly string[];
-  readonly optionalInputs: readonly string[];
-  readonly outputs: readonly string[];
-  readonly tokens: readonly string[];
-};
-
-export type ParseOperator = {
-  readonly id: string;
-  readonly cost: number;
-  readonly io: OperatorIO;
-  readonly run: (ctx: ParseContext, input: unknown) => unknown;
-};
+import type { ParseOperator } from "./operator_reflection.js";
+export type { ParseOperator, OperatorRun, ChannelsOf, OperatorSignatureView } from "./operator_reflection.js";
 
 export type ColumnSpec = {
   readonly name: string;

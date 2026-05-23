@@ -6,6 +6,7 @@
 
 import { companyUpdatesAF, summarisePressure } from "./af.js";
 import { PRIMITIVES, makeEnforceSchema, regexEmitDate } from "./operators.js";
+import { signatureOf } from "./operator_reflection.js";
 import { makeBeamSolver } from "./solver.js";
 import type { FieldHypothesis, ParseContext, RowHypothesis } from "./types.js";
 
@@ -148,39 +149,33 @@ assert(
   cells.every((c) => c.traceRegionId === undefined || traces.some((t) => t.id === c.traceRegionId)),
 );
 
-// --- defineOperator: IO is reflected from a single typed channel spec ------
-// `regexEmitDate` is built via `defineOperator`. The `inputs` spec is a
-// single declaration whose property-modifier-style helpers (`required<T>()`
-// / `optional<T>()`) drive both the run-body's input type (`?`-property
-// for optional channels) and the operator's `io` record. The assertions
-// below witness that:
-//
-//   (a) only required-input keys land in `io.requiredInputs` —
-//       `trace.regions` is optional and excluded;
-//   (b) `io.optionalInputs` carries the optional read explicitly;
-//   (c) the operator participates in the solver's top creature.
+// --- ParseOperator<I,O>: function signature is the source of truth ---------
+// `regexEmitDate` is declared as `ParseOperator<I, O>` where `I`'s `?`
+// modifiers say which channels are optional. The `channels` value
+// carries the same names at runtime — type-system enforced — and
+// `signatureOf(op)` is the derived view the solver consumes.
+const sig = signatureOf(regexEmitDate);
 assert(
-  "regexEmitDate.io.requiredInputs reflects only required channels (trace.regions excluded)",
-  ["text.normalized", "spans.url"].every((k) => regexEmitDate.io.requiredInputs.includes(k)) &&
-    !regexEmitDate.io.requiredInputs.includes("trace.regions") &&
-    regexEmitDate.io.requiredInputs.length === 2,
-  `requiredInputs=${regexEmitDate.io.requiredInputs.join(",")}`,
+  "signatureOf(regexEmitDate).requiredInputs lists only required channels (trace.regions excluded)",
+  ["text.normalized", "spans.url"].every((k) => sig.requiredInputs.includes(k)) &&
+    !sig.requiredInputs.includes("trace.regions") &&
+    sig.requiredInputs.length === 2,
+  `requiredInputs=${sig.requiredInputs.join(",")}`,
 );
 assert(
-  "regexEmitDate.io.optionalInputs carries trace.regions",
-  regexEmitDate.io.optionalInputs.includes("trace.regions") &&
-    regexEmitDate.io.optionalInputs.length === 1,
-  `optionalInputs=${regexEmitDate.io.optionalInputs.join(",")}`,
+  "signatureOf(regexEmitDate).optionalInputs carries trace.regions",
+  sig.optionalInputs.includes("trace.regions") && sig.optionalInputs.length === 1,
+  `optionalInputs=${sig.optionalInputs.join(",")}`,
 );
 assert(
-  "regexEmitDate.io.outputs reflects all declared output channels",
-  ["spans.dated", "trace.regions"].every((k) => regexEmitDate.io.outputs.includes(k)) &&
-    regexEmitDate.io.outputs.length === 2,
-  `outputs=${regexEmitDate.io.outputs.join(",")}`,
+  "signatureOf(regexEmitDate).outputs reflects all declared output channels",
+  ["spans.dated", "trace.regions"].every((k) => sig.outputs.includes(k)) &&
+    sig.outputs.length === 2,
+  `outputs=${sig.outputs.join(",")}`,
 );
 const dateChainTop = top?.genes.some((g) => g.operatorId === "regex.emit.date");
 assert(
-  "the signature-derived operator participates in the top creature",
+  "the typed operator participates in the top creature",
   dateChainTop === true,
   `genes=${top?.genes.map((g) => g.operatorId).join(">>")}`,
 );

@@ -1,99 +1,122 @@
-// Signature-derived operator construction.
+// Operator declarations driven by the run function's type.
 //
-// One vocabulary, no parallel ontology. An operator declares a single
-// `inputs` channel spec and a single `outputs` channel spec; each
-// `inputs` entry is marked `required<T>()` or `optional<T>()`. The
-// `?` modifier on the typed input bag is the projection — exactly the
-// way TypeScript already says "this property may be present or absent",
-// not a parser_evolver concept layered on top.
+// Principle, in three sentences:
 //
-// The same declaration drives two things:
-//   - the type of the run body's input parameter (mapped type:
-//     `required<T>()` -> required property of type T; `optional<T>()`
-//     -> `?`-property of type T),
-//   - the `OperatorIO` record on the returned operator
-//     (`Object.keys(inputs)` partitioned by a tag check yields
-//     `requiredInputs` and `optionalInputs`; `Object.keys(outputs)` is
-//     `outputs`).
+//   1. The operator's run function — its parameter type and its return
+//      type — IS the operator's signature. TypeScript already encodes
+//      "required vs. optional input" via the `?` property modifier and
+//      "output channels" via the return type. There should be no
+//      parallel hand-authored ontology.
 //
-// Drift between the declared inputs and the run body's reads is a type
-// error. There is no second slot to keep in sync.
+//   2. The solver runs at runtime, and TypeScript types are erased at
+//      runtime. So beam-search composition cannot consult the run
+//      function's *type* directly to ask "what channels does this
+//      operator require?" — that type is gone. Some value-level
+//      residue is unavoidable.
+//
+//   3. Minimise that residue, bind it to the function type so it can't
+//      diverge (the type system rejects channel names that aren't
+//      drawn from the function's signature), and derive the solver's
+//      view from it on demand via `signatureOf(op)` rather than
+//      storing a separate authoritative `op.io` field.
+//
+// Caller pattern (most TypeScript-native form):
+//
+//   export const regexEmitDate: ParseOperator<{
+//     "text.normalized": string;
+//     "spans.url":       readonly FieldHypothesis[];
+//     "trace.regions"?: readonly TraceRegion[];
+//   }, {
+//     "spans.dated":   readonly FieldHypothesis[];
+//     "trace.regions": readonly TraceRegion[];
+//   }> = {
+//     id: "regex.emit.date", cost: 2, tokens: [...],
+//     run: (_ctx, input) => { ...input is typed by I, return by O... },
+//     channels: {
+//       requiredInputs: ["text.normalized", "spans.url"],
+//       optionalInputs: ["trace.regions"],
+//       outputs:        ["spans.dated", "trace.regions"],
+//     },
+//   };
+//
+// `I` and `O` are written once, at the value's type annotation. The
+// `run` body's input parameter and return type flow from `I` and `O`
+// by TypeScript's normal contextual typing. The `channels` arrays are
+// typed by `ChannelsOf<I, O>`, so the type system rejects any channel
+// name not present in `I` or `O`. There is no separate `defineOperator`
+// generic to infer through — the value's own type annotation does it.
 
-import type { OperatorIO, ParseContext, ParseOperator } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// Channel-spec primitives.
-// ---------------------------------------------------------------------------
-
-declare const OPTIONAL_TAG: unique symbol;
-
-// Brand carried only at the type level. The runtime form is a tagged
-// object — the tag is what `defineOperator` reads to partition.
-export type Optional<T> = { readonly [OPTIONAL_TAG]: true; readonly __t?: T };
-
-const OPTIONAL_MARK: unique symbol = Symbol.for("parser_evolver.optional");
-const REQUIRED_SENTINEL = Object.freeze({});
-const OPTIONAL_SENTINEL = Object.freeze({ [OPTIONAL_MARK]: true });
-const isOptionalMarker = (v: unknown): boolean =>
-  typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[OPTIONAL_MARK] === true;
-
-export const required = <T>(): T => REQUIRED_SENTINEL as unknown as T;
-export const optional = <T>(): Optional<T> => OPTIONAL_SENTINEL as unknown as Optional<T>;
-
-// ---------------------------------------------------------------------------
-// Type-level projection: turn an inputs spec into the typed bag the run
-// body receives. Keys whose value type extends `Optional<U>` become
-// `?`-properties of type `U`; all other keys are required properties.
-// ---------------------------------------------------------------------------
-
-export type ChannelSpec = Readonly<Record<string, unknown>>;
-
-type RequiredKeys<I> = { [K in keyof I]: I[K] extends Optional<unknown> ? never : K }[keyof I];
-type OptionalKeys<I> = { [K in keyof I]: I[K] extends Optional<unknown> ? K : never }[keyof I];
-
-export type InputBag<I extends ChannelSpec> = Readonly<
-  { [K in RequiredKeys<I>]: I[K] } & {
-    [K in OptionalKeys<I>]?: I[K] extends Optional<infer U> ? U : never;
-  }
->;
-
-export type OutputBag<O extends ChannelSpec> = Readonly<{ [K in keyof O]: O[K] }>;
+import type { ParseContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// defineOperator: a single inputs spec, a single outputs spec.
+// Type-level utilities.
 // ---------------------------------------------------------------------------
 
-export type DefineOperatorArgs<I extends ChannelSpec, O extends ChannelSpec> = {
+export type RequiredKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T];
+export type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T];
+
+// An operator's run function.
+export type OperatorRun<I, O> = (ctx: ParseContext, input: I) => O;
+
+// `ChannelsOf<I, O>` is the projection of `I` and `O` into channel-name
+// arrays. The type system enforces that every name in these arrays is
+// a key of `I` (for requiredInputs/optionalInputs) or `O` (for
+// outputs). Foreign channel names are a type error.
+export type ChannelsOf<I, O> = {
+  readonly requiredInputs: readonly Extract<RequiredKeys<I>, string>[];
+  readonly optionalInputs: readonly Extract<OptionalKeys<I>, string>[];
+  readonly outputs:        readonly Extract<keyof O, string>[];
+};
+
+// ---------------------------------------------------------------------------
+// ParseOperator.
+// ---------------------------------------------------------------------------
+
+// The defaults `any, any` make `ParseOperator` (with no type args)
+// accept operators with any specific IO. The generic parameters are
+// invariant via `channels`'s mapped type, so `unknown` defaults would
+// collapse `RequiredKeys<unknown>` to `never` and reject specific
+// operators. `any` is the right TypeScript-ism here.
+export type ParseOperator<I = any, O = any> = {
   readonly id: string;
   readonly cost: number;
-  // Tokens have no implementation analogue to reflect off — they're
-  // the symbolic embedding signal — so they're co-located here so the
-  // operator has a single source of truth for everything in `io`.
   readonly tokens: readonly string[];
-  readonly inputs: I;
-  readonly outputs: O;
-  readonly run: (ctx: ParseContext, input: InputBag<I>) => OutputBag<O>;
+  readonly channels: ChannelsOf<I, O>;
+  readonly run: OperatorRun<I, O>;
 };
 
-const partitionInputs = (inputs: ChannelSpec): { requiredInputs: readonly string[]; optionalInputs: readonly string[] } => {
-  const requiredInputs: string[] = [];
-  const optionalInputs: string[] = [];
-  for (const [k, v] of Object.entries(inputs)) {
-    (isOptionalMarker(v) ? optionalInputs : requiredInputs).push(k);
-  }
-  return { requiredInputs: Object.freeze(requiredInputs), optionalInputs: Object.freeze(optionalInputs) };
+// `signatureOf(op)` is the solver's view — a derivation, not stored
+// state. The solver calls it whenever it needs to ask about an
+// operator's IO; there is no `op.io` field to keep in sync.
+export type OperatorSignatureView = {
+  readonly requiredInputs: readonly string[];
+  readonly optionalInputs: readonly string[];
+  readonly outputs: readonly string[];
+  readonly tokens: readonly string[];
 };
 
-export const defineOperator = <I extends ChannelSpec, O extends ChannelSpec>(
-  args: DefineOperatorArgs<I, O>,
-): ParseOperator => {
-  const { requiredInputs, optionalInputs } = partitionInputs(args.inputs);
-  const outputs = Object.freeze(Object.keys(args.outputs));
-  const io: OperatorIO = { requiredInputs, optionalInputs, outputs, tokens: args.tokens };
-  // The bag the solver passes in is untyped (`unknown`); we narrow it
-  // to the declared shape at the boundary. The narrowing is a single
-  // cast at the edge — internal code stays typed.
-  const run: ParseOperator["run"] = (ctx, input) =>
-    args.run(ctx, input as InputBag<I>) as unknown;
-  return { id: args.id, cost: args.cost, io, run };
-};
+export const signatureOf = (op: ParseOperator): OperatorSignatureView => ({
+  requiredInputs: op.channels.requiredInputs,
+  optionalInputs: op.channels.optionalInputs,
+  outputs: op.channels.outputs,
+  tokens: op.tokens,
+});
+
+// ---------------------------------------------------------------------------
+// What about `defineOperator` / runtime checks?
+//
+// In this design the caller annotates the value with `ParseOperator<I, O>`
+// and TypeScript propagates contextual types into the run body and the
+// channels arrays. A `defineOperator` factory function would only
+// re-package what is already a fully-typed object literal, so it's
+// pure overhead. We skip it.
+//
+// Exhaustiveness of `channels.requiredInputs` (must list every required
+// key of `I`) is not compactly expressible in TypeScript without
+// codegen. In practice, the run body's typed access to `input[K]`
+// makes a missing key noticeable at the call site: if the caller
+// forgets to list "spans.url" as required, the solver may try to
+// schedule the operator before spans.url is in scope, and the run
+// body's typed `input["spans.url"]: readonly FieldHypothesis[]` would
+// receive undefined at runtime — a developer error that tests catch.
+// This is the documented TS-erasure boundary; see signatures_first.md.

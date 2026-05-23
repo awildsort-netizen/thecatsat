@@ -82,15 +82,15 @@ for (const p of dist.proposedOperators) {
   console.log(`confidence:     ${p.confidence}`);
 }
 
-banner("Step 5: lift proposal to a parser_evolver ParseOperator (io derived)");
+banner("Step 5: lift proposal to a parser_evolver ParseOperator (typed)");
 const lifted = liftProposalToOperator(dist.proposedOperators[0]!);
 console.log(`lifted operator id: ${lifted.id}`);
-console.log(`lifted io:          ${JSON.stringify(lifted.io)}    // reflected from the run-body's typed channel spec, not authored fields`);
+console.log(`lifted channels:    ${JSON.stringify(lifted.channels)}    // typed by ParseOperator<I,O>; channel names drawn from the function signature`);
 const liftedOut = lifted.run(
   { url: ipoTrace.pageUrl, rawText: "", normalizedText: "" },
-  { from: "demo" },
-) as Record<string, unknown>;
-const liftedPayload = liftedOut["browser_oracle.proposal"] as Record<string, unknown>;
+  {},
+);
+const liftedPayload = liftedOut["browser_oracle.proposal"];
 console.log(`lifted.run output:  ${JSON.stringify({ proposalId: liftedPayload.proposalId, evidenceFields: liftedPayload.evidenceFields })}`);
 
 banner("Step 6: bridge into a prepass hint");

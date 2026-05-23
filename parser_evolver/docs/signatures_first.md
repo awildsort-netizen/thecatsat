@@ -10,124 +10,150 @@
 > redundant manual ontology."
 >
 > "What is with the urge to keep 'legacy' shit for this — why not just
-> prune? You're accumulating bullshit during prototyping."
+> prune?"
+>
+> "Why didn't we use the type system for required and optional? And
+> what is `outputs`? These could be replaced by an operator signature
+> type, no? Ideally one that TypeScript already does?"
 
-This note records the load-bearing principles behind
-[`operator_reflection.ts`](../operator_reflection.ts), the new shape of
-`ParseOperator.io`, and the migration of every primitive operator to
-`defineOperator`.
+The four user corrections above land at the same place from different
+angles. This note describes where the design ended up and where the
+type system can't go further.
 
-## Two principles, one direction
+## The principle
 
-**Host-language alignment.** TypeScript already has a vocabulary for
-"required vs. optional property" — the `?` modifier on object types.
-It has a vocabulary for "what does this function consume and produce"
-— its parameter and return types. When we invent a parallel ontology
-(`needs`, `requires`, `reads`, `provides` as separate hand-authored
-string arrays alongside an implementation that already encodes the
-same information), we duplicate what the type system already knows.
-Any duplication is a place for drift. Syntax sugar is not "just" sugar:
-the `?` on `{ traceRegions?: TraceRegion[] }` isn't a shorthand for some
-other declaration; it *is* the declaration. By treating that single
-declaration as authoritative, an entire layer of bookkeeping collapses
-into nothing.
+**The operator's run function is the operator's signature.**
 
-**Prototype pruning discipline.** While the system is young, redundant
-scaffolds should be deleted aggressively. Compatibility adapters are
-semantic plaque unless they protect a real external boundary (a
-shipped public API, an over-the-wire protocol, an on-disk format with
-existing consumers). None of those apply here: `parser_evolver` is
-prototype clay and every "legacy" path we keep is a place future-us
-has to defend twice. Prune.
+TypeScript already encodes everything we need at compile time:
 
-## How the language reflects the principle
+- **Required vs. optional inputs** — the `?` property modifier on the
+  function's input parameter type.
+- **Outputs** — the keys of the function's return type.
+- **Channel value shapes** — the property types at those keys.
 
-A single `inputs` channel spec, declared once. Each channel's value is
-a typed marker — either `required<T>()` (must be in scope before the
-operator runs, gates solver eligibility) or `optional<T>()` (a
-contextual read that may or may not be in scope). The same marker
-drives two things at once:
-
-1. The **type** of the run body's input parameter: a mapped type
-   collapses required entries into normal properties and optional
-   entries into `?`-properties. The `?` you see on
-   `input["trace.regions"]` is the same `?` TypeScript uses for any
-   optional property.
-2. The **runtime `io` record**: `Object.keys(inputs)` partitioned by a
-   tag-check yields `requiredInputs` and `optionalInputs`;
-   `Object.keys(outputs)` yields `outputs`. The solver reads these
-   directly.
-
-There is no second slot for either. The `?` is the ontology.
+A `ParseOperator<I, O>` is essentially a typed function plus a tiny
+runtime witness. There is no `OperatorSignature` type with `needs`,
+`provides`, `tokens` arrays. There is no `OperatorIO` storage of those
+arrays. There is no `defineOperator` factory. The value is its own
+declaration:
 
 ```ts
-defineOperator({
-  id: "regex.emit.date",
-  cost: 2,
-  tokens: ["regex", "extract", "date", ...],
-
-  inputs: {
-    "text.normalized": required<string>(),
-    "spans.url":       required<readonly FieldHypothesis[]>(),
-    // Optional read: the `?` on the typed input bag IS the projection.
-    "trace.regions":   optional<readonly TraceRegion[]>(),
+export const regexEmitDate: ParseOperator<
+  {
+    "text.normalized": string;
+    "spans.url":       readonly FieldHypothesis[];
+    "trace.regions"?: readonly TraceRegion[];   // <-- TypeScript's `?`
   },
-  outputs: {
-    "spans.dated":   required<readonly FieldHypothesis[]>(),
-    "trace.regions": required<readonly TraceRegion[]>(),
+  {
+    "spans.dated":   readonly FieldHypothesis[];
+    "trace.regions": readonly TraceRegion[];
+  }
+> = {
+  id: "regex.emit.date", cost: 2, tokens: [...],
+  run: (_ctx, input) => { /* input typed by I, return by O */ },
+  channels: {
+    requiredInputs: ["text.normalized", "spans.url"],
+    optionalInputs: ["trace.regions"],
+    outputs:        ["spans.dated", "trace.regions"],
   },
-
-  // input["text.normalized"] : string
-  // input["spans.url"]       : readonly FieldHypothesis[]
-  // input["trace.regions"]   : readonly TraceRegion[] | undefined
-  run: (_ctx, input) => { ... },
-});
+};
 ```
 
-A drift between the run body and the declared inputs is now a type
-error. The signature can't get out of sync with the implementation
-because they are the same declaration projected two ways.
+TypeScript's contextual typing flows from the `ParseOperator<I, O>`
+annotation into the run body's input parameter, into the return type,
+and into the `channels` arrays (whose elements are typed by
+`ChannelsOf<I, O>` — drawn from `RequiredKeys<I>`, `OptionalKeys<I>`,
+and `keyof O`). The type system rejects any channel name that isn't
+present in `I` or `O`. We verified this with `@ts-expect-error`
+markers on a smoke test: foreign channel names in `channels.*` fail
+to typecheck.
 
-## What was pruned
+## The TypeScript-erasure boundary (the honest part)
 
-- **`OperatorSignature` is gone.** `ParseOperator.io: OperatorIO` is
-  the single shape every consumer reads:
-  `{ requiredInputs, optionalInputs, outputs, tokens }`. The solver
-  and the embedding layer were updated to read this directly. No
-  adapter, no `toLegacySignature` function, no `signature.needs` field.
-- **All five primitives migrated** to `defineOperator`. The previous
-  PR migrated only `regex.emit.date`; the rest were left as a
-  "side-by-side comparison" — which is exactly the kind of bullshit
-  prototype clay shouldn't accumulate. The migration surfaced the
-  same `trace.regions` drift on `regex.emit.url` and `regex.emit.title`
-  (their hand-authored `needs` claimed `["text.normalized"]` and
-  `["text.normalized", "spans.url"]` but their run bodies also read
-  `bag["trace.regions"]`); honestly declared as `optional<...>` now.
-- **`ProposedStaticOperator.needs` / `.provides` are gone.** The
-  proposal carries only authored material (`evidenceFields`,
-  `requestTemplate`, `materialHints`, `tokens`, `cost`). The lifter
-  reflects the operator's `io` from the run body's typed channel spec
-  via `defineOperator`.
+TypeScript types are fully erased at runtime. The beam-search solver
+needs to ask at runtime, "given the current channel-bag, which
+operators are eligible to run next?" That requires `Object.keys`-style
+access to the channel names — which means *some* value-level residue
+of the type-level declaration has to live on the operator object.
 
-## What this means for the solver / embedding / disassembler
+The minimum residue is:
 
-They read `op.io.requiredInputs` for eligibility, `op.io.outputs` for
-channel availability, `op.io.tokens` for embedding. That's all. The
-indirection through a separate `signature` object — useful only when
-the same info was authored elsewhere and might disagree — went away
-because the disagreement isn't possible anymore.
+- `channels.requiredInputs: readonly string[]` — what gates eligibility.
+- `channels.optionalInputs: readonly string[]` — typed for the run
+  body, not eligibility (could be inferred at runtime as
+  `output - required`, but listing it makes the documentation visible
+  and is one line either way).
+- `channels.outputs: readonly string[]` — what becomes available
+  downstream.
+- `tokens: readonly string[]` — the embedding signal; no type-level
+  analogue.
+
+These four arrays are the entire runtime residue. They are typed by
+`ChannelsOf<I, O>` so the compiler enforces "every channel name here
+must be a key of I or O" — the runtime witness cannot drift away from
+the function type by accident.
+
+What the type system **cannot** enforce compactly:
+
+- **Exhaustiveness**: `channels.requiredInputs` could be `[]` even if
+  `I` has required keys. Encoding "this readonly tuple must list every
+  key of this union, with no duplicates" in TypeScript requires either
+  recursive union-to-tuple tricks (unsound or fragile) or codegen. We
+  do not attempt this. In practice the run body's typed access to
+  `input["spans.url"]: readonly FieldHypothesis[]` makes an unlisted
+  required key visible quickly: the solver will schedule the operator
+  before `spans.url` is in scope, the run body will receive
+  `undefined`, and existing tests will fail.
+
+That is the documented boundary. We chose to live with it rather than
+ship codegen.
+
+## What this revision pruned vs. the previous one
+
+The previous design carried a stored `op.io: OperatorIO` field with
+arrays the solver read directly. Even that turned out to be
+unnecessary: `op.channels` is the same data already typed via
+`ChannelsOf<I, O>`, and the solver can call `signatureOf(op)` (a tiny
+derivation function) when it wants the unified view. There is no
+duplicate `op.io`.
+
+Also pruned:
+
+- `OperatorSignature` type (gone).
+- `OperatorIO` type (gone).
+- `toLegacySignature` adapter (gone).
+- `ReflectedOperator` wrapper type (gone).
+- `defineOperator` factory function (gone — declaring the value with
+  a `ParseOperator<I, O>` annotation does all the work).
+- `required<T>()` / `optional<T>()` value-marker helpers (gone — the
+  `?` modifier on `I` does the same job, more idiomatically).
+
+## What the solver / embedding read
+
+```ts
+import { signatureOf } from "./operator_reflection.js";
+
+// In solver.ts:
+signatureOf(op).requiredInputs   // for eligibility
+signatureOf(op).outputs          // for availableChannels and saturation
+op.tokens                        // for embedding (no view needed)
+```
+
+`signatureOf` is the only derivation. No stored `signature`/`io` field
+to keep in sync with anything.
 
 ## Where this goes next
 
-- Apply the same principle on the Python side using `inspect.signature`,
-  `typing.get_type_hints`, and dataclass fields. Python's runtime
-  reflection is stronger and can probably eliminate even the
-  `required<T>()` / `optional<T>()` helpers (they're TypeScript's
-  price for not having parameter introspection at runtime).
-- Reduce `materialHints: readonly string[]` on browser-oracle
-  proposals to a derived projection over the request and trace, so
-  embedding tokens too grow out of the implementation rather than
-  being hand-listed.
-- If a downstream consumer ever needs the old `{needs, provides}`
-  shape (a CLI dump, a bytecode disassembler), build it at the
-  boundary — not on `ParseOperator` itself.
+- **Python**. `inspect.signature`, `typing.get_type_hints`, and
+  dataclass field introspection let Python do at runtime what
+  TypeScript can only do at compile time. A Python `ParseOperator`
+  can probably drop the `channels` witness entirely and derive it
+  from the run function's annotations on demand. That is the obvious
+  follow-up.
+- **`materialHints` on `ProposedStaticOperator`** is still
+  hand-authored. It's a content concept (embedding tokens harvested
+  from the trace), not an IO concept; deriving it from a projection
+  over the request and trace is a noted next step.
+- **Bytecode disassembler views**. If something downstream wants a
+  flat `{needs, provides}`-style summary for display, build it at the
+  boundary via `signatureOf(op)` — not by storing it on the operator.

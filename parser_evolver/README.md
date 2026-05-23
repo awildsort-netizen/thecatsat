@@ -14,19 +14,21 @@ why the typed `Hallucination` artifacts are shaped the way they are.
 
 ## Files
 
-- `types.ts` — `ParseOperator` (carries a single `io: OperatorIO`
-  record with `requiredInputs`, `optionalInputs`, `outputs`, `tokens`),
-  `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the first-class
-  typed hallucination artifacts: `Hallucination`, `HallucinationKind`,
-  `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader hook.
-- `operator_reflection.ts` — `defineOperator(...)` builds a
-  `ParseOperator` from a single typed `inputs`/`outputs` channel
-  spec. Channels marked `required<T>()` gate solver eligibility;
-  channels marked `optional<T>()` are typed as `?`-properties on the
-  run body's input bag (the same `?` TypeScript uses for any optional
-  property). `op.io` is reflected from the spec — no parallel
-  hand-authored signature. See
-  [`docs/signatures_first.md`](docs/signatures_first.md).
+- `types.ts` — `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the
+  first-class typed hallucination artifacts: `Hallucination`,
+  `HallucinationKind`, `TraceRegion`, `FailurePressure`, plus a
+  `RowKernel` shader hook. Re-exports the `ParseOperator<I, O>` type
+  from `operator_reflection.ts`.
+- `operator_reflection.ts` — `ParseOperator<I, O>` is the typed
+  operator value: `I` is the run-function's input bag (required vs.
+  optional via TypeScript's `?` modifier), `O` is the return type,
+  and a small `channels` value carries the same channel names at
+  runtime (TypeScript types are erased; the solver needs runtime
+  access). `ChannelsOf<I, O>` constrains the channel arrays to be
+  drawn from `I` and `O` — no foreign channels. `signatureOf(op)` is
+  the solver's derived view. There is no separately stored signature
+  field. See [`docs/signatures_first.md`](docs/signatures_first.md)
+  for the TypeScript-erasure boundary and the design rationale.
 - `embedding.ts` — symbolic operator embedding (token-bag cosine). Used by
   the solver to prune extensions by similarity to *remaining* AF needs.
 - `operators.ts` — five primitives plus an AF-bound enforcer:

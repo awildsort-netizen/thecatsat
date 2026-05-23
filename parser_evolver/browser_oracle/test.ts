@@ -131,35 +131,37 @@ assert(
   `tokens=${proposal?.materialHints.join(",")}`,
 );
 
-// Lift to a real ParseOperator — `io` is derived from the lifted run
-// body's typed channel spec via defineOperator, not copied from
-// explicit fields on the proposal.
+// Lift to a real ParseOperator. The lifted operator's typed
+// `ParseOperator<I, O>` annotation says it requires nothing and
+// produces a single `browser_oracle.proposal` channel; the
+// `channels` value at runtime carries the same names because the
+// type system constrains it to channels drawn from I and O.
 const lifted = liftProposalToOperator(proposal!);
 assert(
-  "lifted operator has a derived io with requiredInputs/outputs/tokens",
-  Array.isArray(lifted.io.requiredInputs) &&
-    Array.isArray(lifted.io.outputs) &&
-    Array.isArray(lifted.io.tokens),
+  "lifted operator carries channel-name witnesses",
+  Array.isArray(lifted.channels.requiredInputs) &&
+    Array.isArray(lifted.channels.outputs) &&
+    Array.isArray(lifted.tokens),
 );
 assert(
-  "lifted operator's requiredInputs is empty (source operator; reads nothing upstream)",
-  lifted.io.requiredInputs.length === 0,
-  `requiredInputs=${lifted.io.requiredInputs.join(",")}`,
+  "lifted operator requires no upstream channels (source operator)",
+  lifted.channels.requiredInputs.length === 0,
+  `requiredInputs=${lifted.channels.requiredInputs.join(",")}`,
 );
 assert(
-  "lifted operator outputs the proposal channel (derived from IO)",
-  lifted.io.outputs.includes("browser_oracle.proposal"),
-  `outputs=${lifted.io.outputs.join(",")}`,
+  "lifted operator outputs the proposal channel",
+  lifted.channels.outputs.includes("browser_oracle.proposal"),
+  `outputs=${lifted.channels.outputs.join(",")}`,
 );
 assert(
   "lifted operator's run returns a structured proposal in the typed output channel",
   (() => {
     const out = lifted.run(
       { url: ipoTrace.pageUrl, rawText: "", normalizedText: "" },
-      { from: "test" },
-    ) as Record<string, unknown>;
-    const payload = out["browser_oracle.proposal"] as Record<string, unknown> | undefined;
-    return payload?.proposalId === proposal!.id && typeof payload?.note === "string";
+      {},
+    );
+    const payload = out["browser_oracle.proposal"];
+    return payload.proposalId === proposal!.id && typeof payload.note === "string";
   })(),
 );
 
