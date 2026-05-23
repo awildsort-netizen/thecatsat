@@ -29,6 +29,7 @@ Vocabulary
 
 from __future__ import annotations
 
+import hashlib
 import random
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
@@ -36,6 +37,20 @@ from typing import Callable, Sequence
 import numpy as np
 
 from sat_furnace import CNF, Clause, clause_satisfied
+
+
+def _stable_view_seed_offset(name: str) -> int:
+    """Process-independent integer derived from a view name.
+
+    The probe seeds each view's RNG from ``self.seed + offset(view)`` so
+    different views explore differently from the same starting point.
+    Using Python's built-in ``hash()`` here would make the seed
+    process-dependent (PYTHONHASHSEED randomization), which breaks
+    cross-run reproducibility of the report. ``hashlib.md5`` is
+    deterministic across processes; we fold to a small int.
+    """
+    digest = hashlib.md5(name.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % 10_000
 
 
 Assignment = list[bool]
@@ -277,7 +292,7 @@ class FlatteningProbe:
 
         for view in views:
             chooser = self._chooser_for(view)
-            run_rng = random.Random(self.seed + hash(view.name) % 10_000)
+            run_rng = random.Random(self.seed + _stable_view_seed_offset(view.name))
             result.runs[view.name] = _run_view(
                 formula=formula,
                 start=list(start),
