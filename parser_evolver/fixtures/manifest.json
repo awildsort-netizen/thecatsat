@@ -1,0 +1,104 @@
+{
+  "description": "Bounded snapshot set for parser_evolver AF training fixtures. See fixtures/README.md for refresh procedure. These are point-in-time fixtures, not crawler output.",
+  "fetched_with": "curl with bounded User-Agent; one request per URL, 1s spacing between requests",
+  "user_agent": "thecatsat-parser-evolver-fixture/0.1 (research; contact: github.com/awildsort-netizen/thecatsat)",
+  "generated_at": "2026-05-21T18:51:04Z",
+  "snapshots": [
+    {
+      "source_id": "status-blockchain-com",
+      "url": "https://status.blockchain.com/",
+      "snapshot_path": "snapshots/status-blockchain-com.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 253310,
+      "sha256": "f08a30fad77b270ac2fd53843a19f1657c2aeff5c5e32fd39323c8f64cd80089",
+      "reachable": true,
+      "notes": "Status page. SPA shell with i18n JSON; component names ('Explorer', 'DeFi Wallet', etc.) and 'No incidents reported' string render inline as static markup."
+    },
+    {
+      "source_id": "blog-index",
+      "url": "https://www.blockchain.com/blog",
+      "snapshot_path": "snapshots/blog-index.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 164742,
+      "sha256": "e5edad49e4661d370cb419cf5b372fbc9e16ccf85a4ad6252a5bad04e30977f6",
+      "reachable": true,
+      "notes": "Blog landing. SPA shell — post list is hydrated client-side and not present in this snapshot."
+    },
+    {
+      "source_id": "blog-ipo-announce",
+      "url": "https://www.blockchain.com/blog/posts/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares",
+      "snapshot_path": "snapshots/blog-ipo-announce.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 164742,
+      "sha256": "e5edad49e4661d370cb419cf5b372fbc9e16ccf85a4ad6252a5bad04e30977f6",
+      "reachable": "shell_only",
+      "notes": "200 OK but server returns the same SPA shell as the blog index (identical sha256). The proposed-IPO post body is not in the static HTML for this URL — flagged so AF training does not assume the post text is present here."
+    },
+    {
+      "source_id": "legal-privacy",
+      "url": "https://www.blockchain.com/legal/privacy",
+      "snapshot_path": "snapshots/legal-privacy.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 1085219,
+      "sha256": "2f24a8d977a768ce4faf004bece52af6ccef2186a7151deb67b69f1ee31095b9",
+      "reachable": true,
+      "notes": "Privacy policy. Contains 'Blockchain.com Privacy Policy' heading and multiple 'Last Updated: <date>' markers including a 2026-03-09 entry."
+    },
+    {
+      "source_id": "legal-terms",
+      "url": "https://www.blockchain.com/legal/terms",
+      "snapshot_path": "snapshots/legal-terms.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 1182389,
+      "sha256": "ad3df6171a035fc0e49bc4fd3f9ea9e64b2942a99dc234ec8c148e5005d6ef14",
+      "reachable": true,
+      "notes": "User Agreement. Heading 'Blockchain.com User Agreement' and 'Last Updated: April 29, 2026' present inline."
+    },
+    {
+      "source_id": "legal-crypto-backed-loans",
+      "url": "https://www.blockchain.com/legal/crypto-backed-loans",
+      "snapshot_path": "snapshots/legal-crypto-backed-loans.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 1081381,
+      "sha256": "a644b8b260f11861cfdb8c5f55c9ea8d02c61c658d1e5b0437616da4daa696b7",
+      "reachable": true,
+      "notes": "Crypto-Backed Loans Terms. Heading 'Crypto-Backed Loans Terms' and 'Last Updated: May 13, 2026' present inline."
+    },
+    {
+      "source_id": "prnewswire-ipo",
+      "url": "https://www.prnewswire.com/news-releases/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares-302461738.html",
+      "snapshot_path": "snapshots/prnewswire-ipo.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "404",
+      "content_type": "text/html;charset=utf-8",
+      "byte_size": 187047,
+      "sha256": "a49aafaf5dd381cc510afe04f02ff28f11f186e9702478de2dc45528d16de8e0",
+      "reachable": false,
+      "notes": "PRNewswire returned a 404 page for this slug. Snapshot retained so AF training can include the 'source returned 404 generic shell' negative example."
+    },
+    {
+      "source_id": "blockchain-com-root",
+      "url": "https://www.blockchain.com/",
+      "snapshot_path": "snapshots/blockchain-com-root.html",
+      "fetch_ts": "2026-05-21T18:51:04Z",
+      "http_status": "200",
+      "content_type": "text/html; charset=utf-8",
+      "byte_size": 1175169,
+      "sha256": "eefcd2570565f4db66ed7c86f015993a2938f590ea24715025ab47ea01c3c1e2",
+      "reachable": true,
+      "notes": "Marketing root. Hero strings 'Invest like an icon' and 'Here since the beginning of crypto' render inline."
+    }
+  ]
+}
