@@ -116,9 +116,9 @@ assert(
   `urlPattern=${proposal?.urlPattern}`,
 );
 assert(
-  "proposal provides the title and body and date fields",
-  ["title", "body", "date"].every((f) => (proposal?.provides ?? []).includes(f)),
-  `provides=${proposal?.provides.join(",")}`,
+  "proposal evidenceFields cover title and body and date (provides is derived from this)",
+  ["title", "body", "date"].every((f) => (proposal?.evidenceFields ?? []).includes(f)),
+  `evidenceFields=${proposal?.evidenceFields.join(",")}`,
 );
 assert(
   "proposal has positive confidence",
@@ -131,22 +131,37 @@ assert(
   `tokens=${proposal?.materialHints.join(",")}`,
 );
 
-// Lift to a real ParseOperator — same signature shape as PRIMITIVES.
+// Lift to a real ParseOperator. The lifted operator's typed
+// `ParseOperator<I, O>` annotation says it requires nothing and
+// produces a single `browser_oracle.proposal` channel; the
+// `channels` value at runtime carries the same names because the
+// type system constrains it to channels drawn from I and O.
 const lifted = liftProposalToOperator(proposal!);
 assert(
-  "lifted operator has needs/provides/tokens (parser_evolver signature shape)",
-  Array.isArray(lifted.signature.needs) &&
-    Array.isArray(lifted.signature.provides) &&
-    Array.isArray(lifted.signature.tokens),
+  "lifted operator carries channel-name witnesses",
+  Array.isArray(lifted.channels.requiredInputs) &&
+    Array.isArray(lifted.channels.outputs) &&
+    Array.isArray(lifted.tokens),
 );
 assert(
-  "lifted operator's run returns a structured proposal (no network executed)",
+  "lifted operator requires no upstream channels (source operator)",
+  lifted.channels.requiredInputs.length === 0,
+  `requiredInputs=${lifted.channels.requiredInputs.join(",")}`,
+);
+assert(
+  "lifted operator outputs the proposal channel",
+  lifted.channels.outputs.includes("browser_oracle.proposal"),
+  `outputs=${lifted.channels.outputs.join(",")}`,
+);
+assert(
+  "lifted operator's run returns a structured proposal in the typed output channel",
   (() => {
     const out = lifted.run(
       { url: ipoTrace.pageUrl, rawText: "", normalizedText: "" },
-      { from: "test" },
-    ) as Record<string, unknown>;
-    return out.proposalId === proposal!.id && typeof out.note === "string";
+      {},
+    );
+    const payload = out["browser_oracle.proposal"];
+    return payload.proposalId === proposal!.id && typeof payload.note === "string";
   })(),
 );
 

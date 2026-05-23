@@ -30,6 +30,7 @@ import type {
   NetworkRequestTrace,
   ProposedStaticOperator,
   RememberedAbsence,
+  RequestTemplate,
   TraceDistillation,
   UrlConstructionFragment,
   ResourceType,
@@ -227,10 +228,13 @@ const proposeOperator = (
   const ok = ev.request.status >= 200 && ev.request.status < 300 ? 1 : 0;
   const coverage = evidenceFields.length / Math.max(1, targets.length);
   const confidence = Math.min(0.95, Math.max(0, ok * (0.3 + 0.4 * useful + 0.4 * coverage)));
+  // The proposal carries only authored material (evidenceFields,
+  // requestTemplate, materialHints). The lifted operator's `io` is
+  // reflected from its run body's typed channel spec — there is no
+  // place on the proposal where it could disagree with the
+  // implementation.
   return {
     id: operatorIdFor(ev.request, source_id),
-    needs: ["url"],
-    provides: evidenceFields,
     tokens: materialHintsFor(ev.request),
     requestTemplate: {
       url: ev.request.url,
@@ -370,26 +374,51 @@ export function distillTrace(
 }
 
 // ---------------------------------------------------------------------------
-// Lifting a proposal into a real ParseOperator. The run-body is a stub
+// Lifting a proposal into a real ParseOperator. The run body is a stub
 // — it announces what it would fetch and returns a structured input
 // shape that a downstream emitter can hand to the AF. We keep the
 // actual fetch out of this prototype on purpose; the point is that the
 // *operator shape* fits the parser_evolver vocabulary unchanged.
+//
+// The lifted operator is declared as
+// `ParseOperator<Record<string, never>, { "browser_oracle.proposal": ProposalRunOutput }>`:
+// no required inputs (it's source-style), one output channel carrying
+// the fetch-plan payload. Per-evidence-field outputs are intentionally
+// not claimed — this stub does not carry the bytes; the surrounding
+// harness must execute the fetch and feed the result back. Claiming
+// otherwise would defeat the point of letting the function signature
+// be the operator's signature.
 // ---------------------------------------------------------------------------
 
-export const liftProposalToOperator = (proposal: ProposedStaticOperator): ParseOperator => ({
+export type ProposalRunOutput = {
+  readonly proposalId: string;
+  readonly requestTemplate: RequestTemplate;
+  readonly evidenceFields: readonly string[];
+  readonly upstream: unknown;
+  readonly note: string;
+};
+
+export const liftProposalToOperator = (
+  proposal: ProposedStaticOperator,
+): ParseOperator<
+  Record<string, never>,
+  { "browser_oracle.proposal": ProposalRunOutput }
+> => ({
   id: proposal.id,
   cost: proposal.cost,
-  signature: {
-    needs: proposal.needs,
-    provides: proposal.provides,
-    tokens: proposal.tokens,
-  },
-  run: (_ctx, input) => ({
-    proposalId: proposal.id,
-    requestTemplate: proposal.requestTemplate,
-    evidenceFields: proposal.evidenceFields,
-    upstream: input,
-    note: "Lifted from a browser-oracle TraceDistillation. Static fetch is not executed inside parser_evolver; the surrounding harness must perform the request and feed bytes back as ParseContext.rawText.",
+  tokens: proposal.tokens,
+  run: (_ctx, _input) => ({
+    "browser_oracle.proposal": {
+      proposalId: proposal.id,
+      requestTemplate: proposal.requestTemplate,
+      evidenceFields: proposal.evidenceFields,
+      upstream: _input,
+      note: "Lifted from a browser-oracle TraceDistillation. Static fetch is not executed inside parser_evolver; the surrounding harness must perform the request and feed bytes back as ParseContext.rawText.",
+    },
   }),
+  channels: {
+    requiredInputs: [],
+    optionalInputs: [],
+    outputs: ["browser_oracle.proposal"],
+  },
 });

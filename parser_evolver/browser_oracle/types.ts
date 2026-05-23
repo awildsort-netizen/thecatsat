@@ -147,10 +147,19 @@ export type RequestTemplate = {
   readonly templatedFragments?: readonly UrlConstructionFragment[];
 };
 
+// A `ProposedStaticOperator` carries only the authored material an
+// external browser-oracle distiller can infer from a network trace:
+//
+//   - `evidenceFields`: the AF columns this proposal would carry.
+//   - `requestTemplate`: the URL/method/content-type to refetch.
+//   - `materialHints`: embedding tokens harvested from the trace.
+//
+// There is no `needs` / `provides` slot. The lifted operator's `io`
+// is reflected from the run body's typed channel spec at
+// `liftProposalToOperator` time. Authoring it twice would be a parallel
+// ontology — exactly the kind of duplication this prototype is pruning.
 export type ProposedStaticOperator = {
   readonly id: string;
-  readonly needs: readonly string[];
-  readonly provides: readonly string[];
   readonly tokens: readonly string[];
   readonly requestTemplate: RequestTemplate;
   readonly urlPattern?: string;

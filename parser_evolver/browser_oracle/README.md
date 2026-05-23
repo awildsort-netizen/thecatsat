@@ -53,9 +53,18 @@ loop is the distillation, operator synthesis, and remembered absence.
        requests** that together carry every target field;
      - emits **URL-construction fragments** describing how the URL was
        built (Next.js `buildId`, `slug`, query params);
-     - emits a **`ProposedStaticOperator`** per minimal request, shaped
-       exactly like a `ParseOperator`: `needs`, `provides`, `tokens`,
-       `cost`. For Next.js route-data fetches the operator id is the
+     - emits a **`ProposedStaticOperator`** per minimal request,
+       carrying only authored material (`evidenceFields`,
+       `requestTemplate`, `materialHints`, `tokens`, `cost`). The
+       lifted operator's full IO type is declared via a
+       `ParseOperator<I, O>` annotation at the `liftProposalToOperator`
+       call site; the run body's input and return types flow from
+       there, and the small `channels` witness carries the same names
+       at runtime. The proposal does not carry a `needs`/`provides`
+       array because that would duplicate (and drift from) the
+       lifted IO. See
+       [`../docs/signatures_first.md`](../docs/signatures_first.md).
+       For Next.js route-data fetches the operator id is the
        well-known `next.route_payload.fetch`; otherwise we synthesise
        `static.fetch.<source_id>_payload`;
      - **records remembered absence** for any required field the trace
@@ -81,7 +90,8 @@ loop is the distillation, operator synthesis, and remembered absence.
   `RememberedAbsence`, `HallucinationNote`, `UrlConstructionFragment`.
 - [`distiller.ts`](distiller.ts) — pure distiller, plus
   `liftProposalToOperator` which lifts a proposal into a real
-  `ParseOperator` with the parser_evolver signature shape.
+  `ParseOperator` whose `io` is reflected from its run body's typed
+  channel spec.
 - [`prepass_bridge.ts`](prepass_bridge.ts) — `hintFromDistillation`.
 - [`fixtures/`](fixtures/) — two synthetic traces. `blog-ipo-announce.trace.json`
   is the positive case (Next.js route-data carries the IPO body);

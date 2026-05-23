@@ -5,7 +5,8 @@
 // "the pipeline ran".
 
 import { companyUpdatesAF, summarisePressure } from "./af.js";
-import { PRIMITIVES, makeEnforceSchema } from "./operators.js";
+import { PRIMITIVES, makeEnforceSchema, regexEmitDate } from "./operators.js";
+import { signatureOf } from "./operator_reflection.js";
 import { makeBeamSolver } from "./solver.js";
 import type { FieldHypothesis, ParseContext, RowHypothesis } from "./types.js";
 
@@ -146,6 +147,37 @@ assert("top candidate accumulates at least one TraceRegion", traces.length > 0);
 assert(
   "every kept cell that has a traceRegionId points to a real trace region",
   cells.every((c) => c.traceRegionId === undefined || traces.some((t) => t.id === c.traceRegionId)),
+);
+
+// --- ParseOperator<I,O>: function signature is the source of truth ---------
+// `regexEmitDate` is declared as `ParseOperator<I, O>` where `I`'s `?`
+// modifiers say which channels are optional. The `channels` value
+// carries the same names at runtime — type-system enforced — and
+// `signatureOf(op)` is the derived view the solver consumes.
+const sig = signatureOf(regexEmitDate);
+assert(
+  "signatureOf(regexEmitDate).requiredInputs lists only required channels (trace.regions excluded)",
+  ["text.normalized", "spans.url"].every((k) => sig.requiredInputs.includes(k)) &&
+    !sig.requiredInputs.includes("trace.regions") &&
+    sig.requiredInputs.length === 2,
+  `requiredInputs=${sig.requiredInputs.join(",")}`,
+);
+assert(
+  "signatureOf(regexEmitDate).optionalInputs carries trace.regions",
+  sig.optionalInputs.includes("trace.regions") && sig.optionalInputs.length === 1,
+  `optionalInputs=${sig.optionalInputs.join(",")}`,
+);
+assert(
+  "signatureOf(regexEmitDate).outputs reflects all declared output channels",
+  ["spans.dated", "trace.regions"].every((k) => sig.outputs.includes(k)) &&
+    sig.outputs.length === 2,
+  `outputs=${sig.outputs.join(",")}`,
+);
+const dateChainTop = top?.genes.some((g) => g.operatorId === "regex.emit.date");
+assert(
+  "the typed operator participates in the top creature",
+  dateChainTop === true,
+  `genes=${top?.genes.map((g) => g.operatorId).join(">>")}`,
 );
 
 const failed = assertions.filter((a) => !a.ok);
