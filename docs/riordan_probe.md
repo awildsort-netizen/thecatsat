@@ -95,39 +95,137 @@ across instance sizes. (The test suite asserts this directly.)
   exercise, and (e) the head-to-head report is reproducible under a
   fixed seed.
 
-## Early reading
+## Early reading (initial 8-instance suite)
 
-On the seeded suite shipped with this PR (run
-`python experiments/riordan_probe.py`):
+On the original seeded suite (8 instances: easy 2-SAT, 3 mid-density
+3-SAT, structural-UNSAT):
 
 - **Pascal**: 1 win, 6 ties, 1 loss vs raw. The single win is on the
   near-threshold 3-SAT instance where raw plateaus — exactly the
   regime where representation geometry would plausibly matter if it
   matters at all.
 - **Signed Pascal**: 0 wins, 7 ties, 1 loss. The inverse partner is
-  closer to neutral; it sometimes finds the same fixed points faster
-  in flip count, but rarely changes the win/loss outcome.
-- **Sierpinski**: 1 win, 5 ties, 2 losses. Slightly noisier than
-  Pascal, which is what you'd expect from a "structure without
-  magnitude" variant.
-- **Spectral**: in this configuration, 0 wins, 5 ties, 3 losses vs
-  raw — weaker than the earlier flattening-probe write-up reported.
-  The difference is the suite shifted slightly between runs; this is
-  the number to trust going forward.
+  closer to neutral.
+- **Sierpinski**: 1 win, 5 ties, 2 losses.
+- **Spectral**: 0 wins, 5 ties, 3 losses vs raw.
 
-That is a faint, possibly real directional signal for the
-recurrence-preserving views on the regime where constraints fight
-each other, and a clean neutral result everywhere else. It is not
-strong enough to claim a method. It is interesting enough to keep
-asking.
+That looked like a faint directional signal for Pascal on the regime
+where constraints fight each other. The follow-up below tested
+whether that signal survives a slightly larger and more deliberate
+near-threshold slice.
 
-The honest summary: **Pascal ≥ raw on most instances and strictly
-better on one near-threshold instance**. The natural follow-ups are
-(a) larger instance sweeps to see whether the signal survives, (b)
-mixing Pascal-direction selection with WalkSAT's local fix-up rather
-than replacing it, and (c) other Riordan-family members (Catalan,
-Motzkin) to test whether the win generalizes within the family or is
-specific to Pascal.
+## Expanded read (paced suite, 22 instances)
+
+Run `python experiments/riordan_probe.py`. The expanded suite adds
+14 near-threshold 3-SAT cases on a small deterministic grid of
+`(n_vars, clauses/variables)` pairs around the random-3-SAT phase
+transition at ratio ≈ 4.26: cells `(10, 4.0)`, `(10, 4.3)`,
+`(10, 4.6)`, `(12, 4.0)`, `(12, 4.3)`, `(12, 4.6)`, `(14, 4.3)`,
+two seeds each. Runtime stays ~2.5s. The full head-to-head against
+raw on final unsatisfied-clause count:
+
+| view             | wins | ties | losses |
+|------------------|-----:|-----:|-------:|
+| pascal           | 0    | 12   | 10     |
+| signed_pascal    | 0    | 19   | 3      |
+| sierpinski       | 1    | 11   | 10     |
+| spectral(k=8)    | 0    | 4    | 1      |
+| spectral(k=10)   | 0    | 2    | 4      |
+| spectral(k=12)   | 0    | 6    | 3      |
+| spectral(k=14)   | 0    | 1    | 1      |
+
+Per-family slice (just `3sat_threshold`, where the question is
+actually contested):
+
+| view             | wins | ties | losses |
+|------------------|-----:|-----:|-------:|
+| pascal           | 0    | 6    | 8      |
+| signed_pascal    | 0    | 12   | 2      |
+| sierpinski       | 0    | 6    | 8      |
+| spectral(k=10)   | 0    | 2    | 4      |
+| spectral(k=12)   | 0    | 5    | 1      |
+| spectral(k=14)   | 0    | 1    | 1      |
+
+This is honestly weaker than the initial read. **The Pascal win
+observed on `3sat_v12_c42_s2` does not generalize.** Across 14
+deterministic near-threshold cases:
+
+- Pascal goes 0/6/8 — meaningfully worse than raw on this slice.
+- Signed Pascal becomes the cleanest neutral (0/12/2): it almost
+  never destabilizes, but it also doesn't outright unblock raw
+  anywhere in the expanded slice.
+- Sierpinski's one win across the full suite is an `unblocks_plateau`
+  on `3sat_threshold_v10_r4.3_s1`, where raw plateaus at strain 21→3
+  for 62 consecutive steps and three of the four non-raw views all
+  reach 0. That single co-win is suggestive (it's the only place all
+  three recurrence views agree that raw is stuck), not conclusive.
+- Spectral views are noisy at small `k` and not noticeably better at
+  larger `k` on this slice.
+- Both structural-UNSAT instances still come back unsatisfiable
+  across every view; the guardrail holds.
+
+## Motion-type labels
+
+To orient the eye over a longer case table, each non-raw view gets
+one of a small fixed set of labels per instance, relative to the raw
+baseline:
+
+- `matches_raw` — same final unsat, comparable flip count.
+- `improves` — strictly fewer final-unsat clauses.
+- `unblocks_plateau` — raw plateaued (long flat-strain stretch and
+  didn't solve) and the view solved.
+- `destabilizes` — view ended worse than raw.
+- `faster_same_outcome` / `slower_same_outcome` — same final unsat
+  but meaningfully different flip counts (solved cases only).
+
+These are deliberately not a typology. They are a small fixed
+vocabulary so the case table is scannable. The full per-view
+distribution lives in the driver output; the only one worth pulling
+out is that across the expanded suite there is exactly one
+`unblocks_plateau` label (Sierpinski on
+`3sat_threshold_v10_r4.3_s1`) — the rest of the non-trivial
+divergences from raw are `slower_same_outcome` or `destabilizes`.
+
+## Honest summary
+
+The signal seen in the original 8-instance suite **did not survive**
+a moderate, deliberately-scoped expansion to 22 instances. On
+near-threshold 3-SAT specifically, Pascal is roughly break-even and
+sometimes worse than raw, Sierpinski is similar, and signed Pascal is
+mostly neutral. The one clean co-win across the recurrence views is
+on a single instance where raw is unambiguously plateaued, which is
+interesting but is one instance.
+
+The framing — "some hardness is representation geometry; rotating the
+coordinate system might help" — still has a foothold on plateau
+cases, but the strong reading ("Pascal helps on near-threshold 3-SAT
+specifically") is not supported by this slice. That is itself useful
+information.
+
+## Paced next steps
+
+Not in this PR. Listed in rough order of cost.
+
+- **Sharpen the plateau case.** Build a tiny sub-suite of instances
+  curated to make raw plateau (long flat strain, didn't solve in
+  budget). Re-test whether recurrence-preserving views agree on that
+  sub-population. This is the only place a directional signal still
+  shows.
+- **Mix, don't replace.** Keep WalkSAT's local fix-up and let the
+  Pascal projection only break ties on which clause to repair. The
+  current chooser fully replaces raw's heuristic; that's a strong
+  intervention.
+- **Strain decay rate, not just endpoint.** The current head-to-head
+  only looks at final unsat. Two views with the same final value
+  can have very different trajectories; the motion labels hint at
+  this but don't quantify it.
+- **One more Riordan member, not all of them.** Catalan or Motzkin
+  would test whether the (small) plateau signal is Pascal-specific
+  or family-wide. Resist running all of them at once.
+- **A random-rotation null.** A view whose basis is a random
+  orthogonal matrix is the right control for "did spectral help
+  because it's spectral, or because it's not identity?" — but only
+  worth running if the plateau sub-suite shows anything first.
 
 ## Where things live
 

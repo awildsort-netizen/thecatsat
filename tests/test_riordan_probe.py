@@ -22,9 +22,14 @@ import sat_furnace
 from geometry.flattening_probe import ProbeResult
 from geometry.riordan_probe import (
     RiordanProbe,
+    compact_trace,
+    family_of,
     head_to_head,
+    head_to_head_by_family,
+    motion_label,
     pascal_matrix,
     pascal_view,
+    plateau_length,
     sierpinski_matrix,
     sierpinski_view,
     signed_pascal_matrix,
@@ -179,6 +184,79 @@ class ReportReproducibilityTests(unittest.TestCase):
         a = head_to_head(self._run_suite(), baseline="raw")
         b = head_to_head(self._run_suite(), baseline="raw")
         self.assertEqual(a, b)
+
+
+class CategorizationHelperTests(unittest.TestCase):
+    """The expanded suite adds family bucketing + motion-type labels +
+    compact traces. These helpers are tiny on purpose; the tests assert
+    only the contract we lean on in the doc/report.
+    """
+
+    def test_family_of_known_prefixes(self) -> None:
+        self.assertEqual(family_of("2sat_easy_v8_c14_s0"), "2sat_easy")
+        self.assertEqual(family_of("3sat_v12_c42_s2"), "3sat_mid")
+        self.assertEqual(family_of("3sat_threshold_v10_r4.3_s0"), "3sat_threshold")
+        self.assertEqual(family_of("unsat_struct_v8_c16_s1"), "unsat_struct")
+        self.assertEqual(family_of("something_else"), "other")
+
+    def test_plateau_length_on_flat_then_descending_trace(self) -> None:
+        flat = (3.0, 3.0, 3.0, 3.0, 2.0, 1.0, 0.0)
+        self.assertEqual(plateau_length(flat), 4)
+        self.assertEqual(plateau_length(()), 0)
+        self.assertEqual(plateau_length((5.0,)), 1)
+        # Strictly descending trajectory has plateau length 1.
+        self.assertEqual(plateau_length((5.0, 4.0, 3.0, 2.0)), 1)
+
+    def test_head_to_head_by_family_only_buckets_present(self) -> None:
+        formula = _planted(seed=8, variables=8, clauses=14, k=3)
+        result = RiordanProbe(max_flips=50, seed=8).run(
+            formula=formula, n_vars=8, instance_id="2sat_easy_v8_c14_sX",
+            planted_satisfiable=True,
+        )
+        by_family = head_to_head_by_family([result], baseline="raw")
+        self.assertIn("2sat_easy", by_family)
+        self.assertEqual(set(by_family.keys()), {"2sat_easy"})
+        for row in by_family["2sat_easy"].values():
+            self.assertEqual(row["wins"] + row["ties"] + row["losses"], 1)
+
+    def test_motion_label_vocabulary_is_bounded(self) -> None:
+        """Whatever the suite throws at us, only the small label set we
+        document in the doc can come back.
+        """
+        allowed = {
+            "matches_raw",
+            "improves",
+            "unblocks_plateau",
+            "destabilizes",
+            "faster_same_outcome",
+            "slower_same_outcome",
+        }
+        formula = _planted(seed=12, variables=10, clauses=43, k=3)
+        result = RiordanProbe(max_flips=80, seed=12).run(
+            formula=formula, n_vars=10, instance_id="3sat_threshold_v10_r4.3_sX",
+            planted_satisfiable=True,
+        )
+        base = result.runs["raw"]
+        for name, run in result.runs.items():
+            if name == "raw":
+                continue
+            self.assertIn(motion_label(base, run), allowed)
+
+    def test_compact_trace_is_deterministic_and_short(self) -> None:
+        formula = _planted(seed=13, variables=10, clauses=43, k=3)
+        a = RiordanProbe(max_flips=60, seed=21).run(
+            formula=formula, n_vars=10, instance_id="t", planted_satisfiable=True,
+        )
+        b = RiordanProbe(max_flips=60, seed=21).run(
+            formula=formula, n_vars=10, instance_id="t", planted_satisfiable=True,
+        )
+        for name in a.runs:
+            trace_a = compact_trace(a.runs[name])
+            trace_b = compact_trace(b.runs[name])
+            self.assertEqual(trace_a, trace_b)
+            # The trace is supposed to stay compact regardless of
+            # max_flips. Hard-cap is generous to avoid brittleness.
+            self.assertLessEqual(len(trace_a), 120)
 
 
 if __name__ == "__main__":

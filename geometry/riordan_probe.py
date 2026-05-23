@@ -220,3 +220,119 @@ def head_to_head(results: list[ProbeResult], baseline: str = "raw") -> dict[str,
             else:
                 row["ties"] += 1
     return summary
+
+
+# --------------------------------------------------------------------------- #
+# Per-family categorization + motion-type labels                              #
+# --------------------------------------------------------------------------- #
+
+
+def family_of(instance_id: str) -> str:
+    """Coarse family label derived from the instance id prefix.
+
+    The suite identifiers follow the pattern ``<family>_..._s<seed>``;
+    we split on the first underscore-block that doesn't look like a
+    parameter to derive a stable family label. Unknown ids fall through
+    to ``other``.
+    """
+    if instance_id.startswith("2sat_easy"):
+        return "2sat_easy"
+    if instance_id.startswith("3sat_threshold"):
+        return "3sat_threshold"
+    if instance_id.startswith("3sat_v"):
+        return "3sat_mid"
+    if instance_id.startswith("unsat_struct"):
+        return "unsat_struct"
+    return "other"
+
+
+def head_to_head_by_family(
+    results: list[ProbeResult], baseline: str = "raw"
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Same shape as ``head_to_head`` but bucketed by family.
+
+    Returns ``{family: {view: {wins, ties, losses}}}``. A family with
+    no comparisons (e.g. baseline missing from every instance) is
+    omitted.
+    """
+    by_family: dict[str, list[ProbeResult]] = {}
+    for result in results:
+        by_family.setdefault(family_of(result.instance_id), []).append(result)
+    return {fam: head_to_head(rs, baseline=baseline) for fam, rs in by_family.items()}
+
+
+def plateau_length(trajectory: Sequence[float], tolerance: float = 1e-9) -> int:
+    """Length of the longest stretch where total strain barely changed.
+
+    A "plateau" here is a run of consecutive trajectory entries whose
+    pairwise differences are within ``tolerance``. Returns the length
+    of the longest such run (minimum 1 if the trajectory is non-empty).
+    Used as one of the motion-type signals.
+    """
+    if not trajectory:
+        return 0
+    best = 1
+    current = 1
+    for prev, nxt in zip(trajectory, trajectory[1:]):
+        if abs(nxt - prev) <= tolerance:
+            current += 1
+            if current > best:
+                best = current
+        else:
+            current = 1
+    return best
+
+
+def motion_label(
+    baseline_run, view_run, *, plateau_threshold: int = 5
+) -> str:
+    """Compact label for how ``view_run`` differs from ``baseline_run``.
+
+    Vocabulary, deliberately small:
+
+    - ``unblocks_plateau`` — baseline plateaued (long flat strain
+      stretch and didn't solve) and the view solved.
+    - ``matches_raw`` — same final unsat as baseline.
+    - ``destabilizes`` — view ended worse than baseline.
+    - ``faster_same_outcome`` — same final unsat, but the view used
+      meaningfully fewer flips (solved cases only).
+    - ``slower_same_outcome`` — same final unsat, but the view used
+      meaningfully more flips (solved cases only).
+
+    This is not a typology; it is a small label set for orienting the
+    eye over the case table.
+    """
+    if view_run.final_unsatisfied < baseline_run.final_unsatisfied:
+        base_plateau = plateau_length(baseline_run.strain_trajectory)
+        if not baseline_run.solved and base_plateau >= plateau_threshold and view_run.solved:
+            return "unblocks_plateau"
+        return "improves"
+    if view_run.final_unsatisfied > baseline_run.final_unsatisfied:
+        return "destabilizes"
+    # Tie on final unsat.
+    if view_run.solved and baseline_run.solved:
+        if view_run.flips + 5 < baseline_run.flips:
+            return "faster_same_outcome"
+        if view_run.flips > baseline_run.flips + 5:
+            return "slower_same_outcome"
+    return "matches_raw"
+
+
+def compact_trace(run, *, head: int = 4) -> str:
+    """One-line deterministic trace of the first few flips + endpoints.
+
+    Returns a string like ``"v3,v0,v5,v3 | plateau=12 | strain 12.0→3.0"``.
+    The ``head`` controls how many variable picks we expose; default is
+    small so the trace stays compact even in tables.
+    """
+    picks = ",".join(f"v{d.flipped_variable}" for d in run.decisions[:head])
+    if not picks:
+        picks = "-"
+    plateau = plateau_length(run.strain_trajectory)
+    if run.strain_trajectory:
+        start = run.strain_trajectory[0]
+        end = run.strain_trajectory[-1]
+        strain_part = f"strain {start:.1f}→{end:.1f}"
+    else:
+        strain_part = "strain n/a"
+    return f"{picks} | plateau={plateau} | {strain_part}"
