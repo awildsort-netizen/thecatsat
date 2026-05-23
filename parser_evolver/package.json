@@ -10,6 +10,8 @@
     "prepass": "tsx prepass/run.ts",
     "prepass-test": "tsx prepass/test.ts",
     "validate-digest": "tsx prepass/validate-digest.ts",
-    "all": "npm run check && npm run test && npm run demo && npm run validate-fixtures && npm run prepass-test && npm run validate-digest"
+    "browser-oracle-test": "tsx browser_oracle/test.ts",
+    "browser-oracle-demo": "tsx browser_oracle/demo.ts",
+    "all": "npm run check && npm run test && npm run demo && npm run validate-fixtures && npm run prepass-test && npm run validate-digest && npm run browser-oracle-test"
   }
 }
