@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["*.ts", "fixtures/*.ts"]
+  "include": ["*.ts", "fixtures/*.ts", "prepass/*.ts", "browser_oracle/*.ts"]
 }

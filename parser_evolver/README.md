@@ -6,15 +6,29 @@ operators — and asks the `CsvAF` climate which creatures fold a page into a
 stable table without lying about the source.
 
 This is a seed, deliberately small. See `docs/interpretation_sieve.md` and
-`docs/tests_as_activation_factors.md` for the H7/thecatsat language used in
-the comments here.
+`docs/tests_as_activation_factors.md` (top-level) for the H7/thecatsat
+language used in the comments here, and
+[`parser_evolver/docs/hallucination_geometry.md`](docs/hallucination_geometry.md)
+for the design note on semantic plaque, operator material profiles, and
+why the typed `Hallucination` artifacts are shaped the way they are.
 
 ## Files
 
-- `types.ts` — `ParseOperator` (needs/provides/embedding-tokens),
-  `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the first-class typed
-  hallucination artifacts: `Hallucination`, `HallucinationKind`,
-  `TraceRegion`, `FailurePressure`, plus a `RowKernel` shader design hook.
+- `types.ts` — `Gene`/`GeneString` (typed bytecode), `CsvAF`, and the
+  first-class typed hallucination artifacts: `Hallucination`,
+  `HallucinationKind`, `TraceRegion`, `FailurePressure`, plus a
+  `RowKernel` shader hook. Re-exports the `ParseOperator<I, O>` type
+  from `operator_reflection.ts`.
+- `operator_reflection.ts` — `ParseOperator<I, O>` is the typed
+  operator value: `I` is the run-function's input bag (required vs.
+  optional via TypeScript's `?` modifier), `O` is the return type,
+  and a small `channels` value carries the same channel names at
+  runtime (TypeScript types are erased; the solver needs runtime
+  access). `ChannelsOf<I, O>` constrains the channel arrays to be
+  drawn from `I` and `O` — no foreign channels. `signatureOf(op)` is
+  the solver's derived view. There is no separately stored signature
+  field. See [`docs/signatures_first.md`](docs/signatures_first.md)
+  for the TypeScript-erasure boundary and the design rationale.
 - `embedding.ts` — symbolic operator embedding (token-bag cosine). Used by
   the solver to prune extensions by similarity to *remaining* AF needs.
 - `operators.ts` — five primitives plus an AF-bound enforcer:
@@ -47,8 +61,27 @@ npm run check              # tsc --noEmit
 npm run test               # tsx test.ts
 npm run demo               # tsx demo.ts
 npm run validate-fixtures  # tsx fixtures/validate.ts
+npm run prepass            # tsx prepass/run.ts        (stdout digest)
+npm run prepass -- --write # also write fixtures/digest.csv + digest.json
+npm run prepass-test       # tsx prepass/test.ts       (19 assertions)
+npm run validate-digest    # tsx prepass/validate-digest.ts
+npm run browser-oracle-test # tsx browser_oracle/test.ts  (28 assertions)
+npm run browser-oracle-demo # tsx browser_oracle/demo.ts  (developmental-trace loop)
 npm run all                # all of the above
 ```
+
+## Browser as developmental trace (fallback / plasticity)
+
+`browser_oracle/` is a fixture-driven prototype of the
+developmental-trace model: a static-parse failure triggers an
+*external* browser oracle, the trace is ingested as JSON, distilled
+into a minimal set of data-bearing requests, and a `ProposedStaticOperator`
+is emitted in the same `needs`/`provides`/`tokens` shape as
+`PRIMITIVES`. Browser is retired only when every required field is
+covered; otherwise a `RememberedAbsence` is recorded so the next tick
+does not summon a browser hoping for a different result. See
+[`browser_oracle/README.md`](browser_oracle/README.md) and the design
+note [`docs/developmental_trace_model.md`](docs/developmental_trace_model.md).
 
 ## Training data
 
@@ -60,6 +93,17 @@ vocabulary, snapshot existence, and evidence-quote presence so the CSV
 cannot silently drift from the snapshots. See `fixtures/README.md` for the
 refresh procedure and the note that snapshots are fixtures, not crawler
 output.
+
+## Monitor pre-pass
+
+`prepass/` runs `parser_evolver` over the bounded fixture snapshots and
+emits a structured candidate digest (vocabulary-controlled fields plus
+`confidence`, typed `hallucination_kinds`, and `trace_region_count`) that a
+future Blockchain.com monitor could read instead of re-extracting from raw
+HTML on every tick. SPA-shell and 404 snapshots are honestly *escalated*
+to `needs-rendered-fetch` / `flag-for-review` rather than fabricated. See
+`prepass/README.md`. **No network I/O; the scheduled monitor is not
+touched.**
 
 ## Typed hallucinations
 

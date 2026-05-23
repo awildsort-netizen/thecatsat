@@ -1,0 +1,194 @@
+[
+  {
+    "source_id": "status-blockchain-com",
+    "source_type": "status-page",
+    "url": "https://status.blockchain.com/",
+    "observed_date": "2026-05-21",
+    "title": "Blockchain.com Status — all systems operational",
+    "category": "incident",
+    "materiality_hint": "none",
+    "field_effect_hint": "availability",
+    "expected_action": "monitor",
+    "confidence": 0.2,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "All systems operational",
+    "snapshot_path": "snapshots/status-blockchain-com.html"
+  },
+  {
+    "source_id": "status-blockchain-com",
+    "source_type": "status-page",
+    "url": "https://status.blockchain.com/",
+    "observed_date": "2026-05-21",
+    "title": "System status component grid present",
+    "category": "product-update",
+    "materiality_hint": "none",
+    "field_effect_hint": "availability",
+    "expected_action": "monitor",
+    "confidence": 0.75,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "System status",
+    "snapshot_path": "snapshots/status-blockchain-com.html"
+  },
+  {
+    "source_id": "status-blockchain-com",
+    "source_type": "status-page",
+    "url": "https://status.blockchain.com/",
+    "observed_date": "2026-05-21",
+    "title": "No incidents reported on status page",
+    "category": "incident",
+    "materiality_hint": "none",
+    "field_effect_hint": "availability",
+    "expected_action": "no-op",
+    "confidence": 0.2,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "No incidents reported",
+    "snapshot_path": "snapshots/status-blockchain-com.html"
+  },
+  {
+    "source_id": "blog-index",
+    "source_type": "blog-index",
+    "url": "https://www.blockchain.com/blog",
+    "observed_date": "2026-05-21",
+    "title": "Blockchain blog landing reachable (SPA shell)",
+    "category": "marketing",
+    "materiality_hint": "none",
+    "field_effect_hint": "none",
+    "expected_action": "ingest-as-fixture-only",
+    "confidence": 0.75,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "Blockchain | Blog",
+    "snapshot_path": "snapshots/blog-index.html"
+  },
+  {
+    "source_id": "blog-ipo-announce",
+    "source_type": "blog-post",
+    "url": "https://www.blockchain.com/blog/posts/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares",
+    "observed_date": "2026-05-21",
+    "title": "Proposed IPO post URL returns SPA shell only",
+    "category": "corporate-announcement",
+    "materiality_hint": "high",
+    "field_effect_hint": "regulatory",
+    "expected_action": "needs-rendered-fetch",
+    "confidence": 0.61,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "Blockchain | Blog",
+    "snapshot_path": "snapshots/blog-ipo-announce.html"
+  },
+  {
+    "source_id": "legal-privacy",
+    "source_type": "legal",
+    "url": "https://www.blockchain.com/legal/privacy",
+    "observed_date": "2026-03-09",
+    "title": "Blockchain.com Privacy Policy updated",
+    "category": "policy-update",
+    "materiality_hint": "medium",
+    "field_effect_hint": "legal-terms",
+    "expected_action": "archive",
+    "confidence": 0.791,
+    "hallucination_kinds": {},
+    "trace_region_count": 10,
+    "evidence_quote": "Last Updated: March 9, 2026",
+    "snapshot_path": "snapshots/legal-privacy.html"
+  },
+  {
+    "source_id": "legal-terms",
+    "source_type": "legal",
+    "url": "https://www.blockchain.com/legal/terms",
+    "observed_date": "2026-04-29",
+    "title": "Blockchain.com User Agreement updated",
+    "category": "policy-update",
+    "materiality_hint": "medium",
+    "field_effect_hint": "legal-terms",
+    "expected_action": "archive",
+    "confidence": 0.791,
+    "hallucination_kinds": {},
+    "trace_region_count": 4,
+    "evidence_quote": "Last Updated: April 29, 2026",
+    "snapshot_path": "snapshots/legal-terms.html"
+  },
+  {
+    "source_id": "legal-crypto-backed-loans",
+    "source_type": "legal",
+    "url": "https://www.blockchain.com/legal/crypto-backed-loans",
+    "observed_date": "2026-05-13",
+    "title": "Crypto-Backed Loans Terms updated",
+    "category": "policy-update",
+    "materiality_hint": "high",
+    "field_effect_hint": "legal-terms",
+    "expected_action": "flag-for-review",
+    "confidence": 0.765,
+    "hallucination_kinds": {},
+    "trace_region_count": 2,
+    "evidence_quote": "Last Updated: May 13, 2026",
+    "snapshot_path": "snapshots/legal-crypto-backed-loans.html"
+  },
+  {
+    "source_id": "prnewswire-ipo",
+    "source_type": "press-release",
+    "url": "https://www.prnewswire.com/news-releases/blockchaincom-announces-confidential-submission-of-draft-registration-statement-for-proposed-initial-public-offering-of-class-a-ordinary-shares-302461738.html",
+    "observed_date": "2026-05-21",
+    "title": "PRNewswire IPO release URL returned 404",
+    "category": "not-found",
+    "materiality_hint": "none",
+    "field_effect_hint": "none",
+    "expected_action": "flag-for-review",
+    "confidence": 0.55,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "404",
+    "snapshot_path": "snapshots/prnewswire-ipo.html"
+  },
+  {
+    "source_id": "blockchain-com-root",
+    "source_type": "marketing",
+    "url": "https://www.blockchain.com/",
+    "observed_date": "2026-05-21",
+    "title": "Blockchain.com marketing root",
+    "category": "marketing",
+    "materiality_hint": "none",
+    "field_effect_hint": "none",
+    "expected_action": "ingest-as-fixture-only",
+    "confidence": 0.75,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "Invest like an icon",
+    "snapshot_path": "snapshots/blockchain-com-root.html"
+  },
+  {
+    "source_id": "blockchain-com-root",
+    "source_type": "marketing",
+    "url": "https://www.blockchain.com/",
+    "observed_date": "2026-05-21",
+    "title": "Blockchain.com marketing tagline",
+    "category": "marketing",
+    "materiality_hint": "none",
+    "field_effect_hint": "none",
+    "expected_action": "ingest-as-fixture-only",
+    "confidence": 0.2,
+    "hallucination_kinds": {
+      "low_coverage_region": 1
+    },
+    "trace_region_count": 0,
+    "evidence_quote": "Here since the beginning of crypto",
+    "snapshot_path": "snapshots/blockchain-com-root.html"
+  }
+]

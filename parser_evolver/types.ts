@@ -91,24 +91,24 @@ export type FailurePressure = {
 };
 
 // ---------------------------------------------------------------------------
-// Operators: tendencies advertised by signature.
+// Operators.
+//
+// `ParseOperator` is defined in `operator_reflection.ts`, generic over
+// the run function's type. The function signature IS the operator's
+// signature — required vs. optional inputs ride on the `?` modifier
+// of the input parameter's type; outputs are the keys of the return
+// type. The minimum value-level residue (channel-name arrays + tokens)
+// lives on the operator only because TypeScript types are erased at
+// runtime and the solver needs *some* way to read them; the solver
+// accesses it through the `signatureOf(op)` view rather than storing
+// it as authoritative state.
+//
+// Importing the type here would create a circular import, so this
+// header just documents the location. See `operator_reflection.ts`.
 // ---------------------------------------------------------------------------
 
-export type OperatorSignature = {
-  readonly needs: readonly string[];
-  readonly provides: readonly string[];
-  // Symbolic embedding tokens drawn from name/comment/file/purpose. Used by
-  // the solver's embedding similarity to discover relatives without
-  // hand-wired conditionals.
-  readonly tokens: readonly string[];
-};
-
-export type ParseOperator = {
-  readonly id: string;
-  readonly cost: number;
-  readonly signature: OperatorSignature;
-  readonly run: (ctx: ParseContext, input: unknown) => unknown;
-};
+import type { ParseOperator } from "./operator_reflection.js";
+export type { ParseOperator, OperatorRun, ChannelsOf, OperatorSignatureView } from "./operator_reflection.js";
 
 export type ColumnSpec = {
   readonly name: string;

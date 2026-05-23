@@ -1,10 +1,11 @@
 // Beam-search solver over gene-strings.
 //
 // A gene-string is a typed bytecode of operator instructions. Decompression
-// runs the genes in order, threading the provided channels forward. Each
-// operator's signature says what channels it needs and provides, so the
-// solver can keep only extensions whose needs are met by the channels
-// currently in scope without ever testing `if op.id === ...`.
+// runs the genes in order, threading the produced channels forward. Each
+// operator's `io` record says which channels it requires and which it
+// outputs, so the solver can keep only extensions whose requiredInputs
+// are met by the channels currently in scope without ever testing
+// `if op.id === ...`.
 //
 // Embedding similarity is load-bearing here: at each frontier, eligible
 // extensions are pruned to top-k by cosine to the AF's column-token bag,
@@ -12,6 +13,7 @@
 // total score break by the last gene's similarity to the AF tokens.
 
 import { fit, similarity, embed } from "./embedding.js";
+import { signatureOf } from "./operator_reflection.js";
 import type {
   CsvAF,
   Gene,
@@ -138,16 +140,16 @@ const availableChannels = (
 ): ReadonlySet<string> =>
   genes.reduce<Set<string>>((set, g) => {
     const op = ops.get(g.operatorId);
-    op?.signature.provides.forEach((p) => set.add(p));
+    if (op) signatureOf(op).outputs.forEach((p) => set.add(p));
     return set;
   }, new Set<string>(["text.normalized"]));
 
-// Eligibility: needs ⊆ available. Ranking + pruning is by embedding cosine
-// to the *remaining* AF tokens — column tokens whose corresponding span
-// channel is not yet filled. Operators whose provides are saturated drop
-// to zero, so the solver doesn't waste its top-K budget re-running the
-// same emitter. `topK` is the load-bearing knob — without it the embedding
-// never gates the search.
+// Eligibility: requiredInputs ⊆ available. Ranking + pruning is by
+// embedding cosine to the *remaining* AF tokens — column tokens whose
+// corresponding span channel is not yet filled. Operators whose outputs
+// are saturated drop to near-zero so the solver doesn't waste its
+// top-K budget re-running the same emitter. `topK` is the load-bearing
+// knob — without it the embedding never gates the search.
 const COLUMN_TO_CHANNEL: Readonly<Record<string, string>> = {
   date: "spans.dated",
   title: "spans.titled",
@@ -168,17 +170,16 @@ const eligibleExtensions = (
   topK: number,
 ): readonly { op: ParseOperator; sim: number }[] => {
   const tokens = remainingTokens(af, channels);
-  // Operators whose provides are entirely already in scope get a strong
-  // demotion: their work has already happened. This makes the embedding
-  // rank by *what's still wanted*, not just by what's nearby.
-  const saturation = (op: ParseOperator): number =>
-    op.signature.provides.length === 0
+  const saturation = (op: ParseOperator): number => {
+    const outs = signatureOf(op).outputs;
+    return outs.length === 0
       ? 0
-      : op.signature.provides.every((p) => channels.has(p))
+      : outs.every((p) => channels.has(p))
         ? 0.01
         : 1;
+  };
   return ops
-    .filter((op) => op.signature.needs.every((n) => channels.has(n)))
+    .filter((op) => signatureOf(op).requiredInputs.every((n) => channels.has(n)))
     .map((op) => ({ op, sim: fit(op, tokens) * saturation(op) }))
     .sort((a, b) => b.sim - a.sim)
     .slice(0, topK);
@@ -205,7 +206,10 @@ const candidateTieKey = (
 ): number => {
   const last = c.genes[c.genes.length - 1];
   const op = last && ops.get(last.operatorId);
-  return op ? similarity(embed(op), embed({ ...op, signature: { ...op.signature, tokens } })) : 0;
+  // Embed the operator against `tokens` by constructing an alternate
+  // view where `tokens` replaces the operator's own — a one-off
+  // probe used only for tie-breaking.
+  return op ? similarity(embed(op), embed({ ...op, tokens })) : 0;
 };
 
 export const makeBeamSolver = (cfg: Partial<BeamConfig> = {}): Solver => {
