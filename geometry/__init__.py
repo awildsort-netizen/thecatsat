@@ -44,10 +44,17 @@ from geometry.bubble_lifecycle import (
     report_row,
     seed_from_strain,
 )
+from geometry.tangent_lift_probe import (
+    ChartMetrics,
+    LiftedChart,
+    RawChart,
+    TangentLiftProbe,
+)
 
 __all__ = [
     "AddressBubble",
     "BubbleReportRow",
+    "ChartMetrics",
     "CollisionSeed",
     "ConstraintStrain",
     "ContainmentReport",
@@ -56,10 +63,13 @@ __all__ = [
     "LIFECYCLE_LABELS",
     "LITMUS_VERDICTS",
     "LifecycleTrace",
+    "LiftedChart",
     "LitmusReading",
     "LitmusSummary",
     "ProbeResult",
+    "RawChart",
     "StrainLocalization",
+    "TangentLiftProbe",
     "boundary_margin",
     "classify_lifecycle",
     "classify_static",
