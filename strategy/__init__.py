@@ -20,12 +20,15 @@ from strategy.operators import (
     StrategyOperator,
     bubble_pressure_gate,
     coordinate_ranker,
+    fitted_coordinate_ranker,
     plateau_detector,
     random_walk_kick,
     raw_strain_ranker,
+    riordan_bubble_fitter,
     unsat_clause_focus,
 )
 from strategy.presets import (
+    fitted_composer,
     gated_transformed_composer,
     raw_composer,
     spectral_view_for,
@@ -34,6 +37,7 @@ from strategy.presets import (
 from strategy.run import composed_local_search, RunRecord, RunReport
 
 __all__ = (
+    "fitted_composer",
     "gated_transformed_composer",
     "raw_composer",
     "spectral_view_for",
@@ -45,9 +49,11 @@ __all__ = (
     "bubble_pressure_gate",
     "composed_local_search",
     "coordinate_ranker",
+    "fitted_coordinate_ranker",
     "plateau_detector",
     "random_walk_kick",
     "raw_strain_ranker",
+    "riordan_bubble_fitter",
     "unsat_clause_focus",
     "RunRecord",
     "RunReport",
