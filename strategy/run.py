@@ -108,7 +108,9 @@ def composed_local_search(
         state.step = step
         for key in ("focused_clause", "veto_transformed", "coordinate_vetoed",
                     "coordinate_dominant", "bubble_pressure_label",
-                    "bubble_pressure_reason"):
+                    "bubble_pressure_reason",
+                    "fit_decision", "fitted_view", "fitted_selected",
+                    "fit_rationale", "current_strain"):
             state.field.pop(key, None)
 
         proposal = composer.step(state)
@@ -138,6 +140,7 @@ def composed_local_search(
                 "veto_transformed": bool(state.field.get("veto_transformed", False)),
                 "bubble_pressure_label": state.field.get("bubble_pressure_label"),
                 "coordinate_vetoed": bool(state.field.get("coordinate_vetoed", False)),
+                "fitted_selected": state.field.get("fitted_selected"),
             }
         )
         history = state.field.get("unsat_history") or []

@@ -293,6 +293,78 @@ def bubble_pressure_gate() -> StrategyOperator:
 
 
 # --------------------------------------------------------------------------- #
+# Riordan bubble fitter — composable, selects a view by stability             #
+# --------------------------------------------------------------------------- #
+
+
+def riordan_bubble_fitter(
+    radius: int = 2,
+    boundary_width: int = 2,
+) -> StrategyOperator:
+    """Gate-style operator: pick the most bubble-stable view among candidates.
+
+    Reads ``state.field['strain_trace']`` if present, otherwise a
+    single-snapshot strain reconstructed from the current assignment.
+    Hands the strain (and optional trace) to
+    :func:`geometry.riordan_bubble_fit.fit`. Publishes the decision onto
+    the field so the downstream :func:`fitted_coordinate_ranker` can
+    consume it; if the fitter vetoes everything, also publishes
+    ``veto_transformed=True`` so the existing transform fallbacks fire.
+
+    The fitter is composable, declarative, and outcome-blind: scoring
+    uses only bubble pressure / containment metrics — never SAT solve
+    state.
+    """
+    from geometry.riordan_bubble_fit import fit
+
+    def _operator(state: SearchState) -> Proposal | None:
+        strain = state.field.get("current_strain")
+        if strain is None:
+            per_var = _per_variable_strain(
+                state.formula, state.assignment, state.n_vars,
+            )
+            strain = [float(x) for x in per_var]
+        trace = state.field.get("strain_trace")
+        decision = fit(
+            strain,
+            trace=trace,
+            radius=radius,
+            boundary_width=boundary_width,
+        )
+        state.field["fit_decision"] = decision
+        state.field["fitted_view"] = decision.view
+        state.field["fitted_selected"] = decision.selected
+        state.field["fit_rationale"] = decision.rationale
+        if decision.veto:
+            state.field["veto_transformed"] = True
+        return None
+
+    return _operator
+
+
+def fitted_coordinate_ranker(state: SearchState) -> Proposal | None:
+    """Coordinate ranker that consumes the view chosen by the bubble fitter.
+
+    Reads ``state.field['fitted_view']`` (populated by
+    :func:`riordan_bubble_fitter`). If absent, yields. If a veto is in
+    effect, yields and marks ``coordinate_vetoed=True``. Otherwise
+    delegates to a one-shot :func:`coordinate_ranker` for the chosen
+    view.
+    """
+    if state.field.get("veto_transformed"):
+        state.field["coordinate_vetoed"] = True
+        return None
+    view = state.field.get("fitted_view")
+    if view is None or not isinstance(view, CoordinateView):
+        return None
+    # The chosen view's basis may be ``identity``; running the
+    # coordinate ranker on identity is a valid no-op (it falls through
+    # to the raw ranker because the per-direction projection equals
+    # the per-variable strain and the routing still works).
+    return coordinate_ranker(view)(state)
+
+
+# --------------------------------------------------------------------------- #
 # Composer                                                                    #
 # --------------------------------------------------------------------------- #
 

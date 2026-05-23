@@ -14,9 +14,11 @@ from strategy.operators import (
     StrategyComposer,
     bubble_pressure_gate,
     coordinate_ranker,
+    fitted_coordinate_ranker,
     plateau_detector,
     random_walk_kick,
     raw_strain_ranker,
+    riordan_bubble_fitter,
     unsat_clause_focus,
 )
 
@@ -80,6 +82,36 @@ def gated_transformed_composer(
             unsat_clause_focus,
             random_walk_kick(walk_probability),
             coordinate_ranker(view),
+            raw_strain_ranker,
+        )
+    )
+
+
+def fitted_composer(walk_probability: float = 0.10) -> StrategyComposer:
+    """Riordan bubble-fit composer: choose a transform by bubble stability.
+
+    Order:
+      1. plateau detector — publishes ``plateau``,
+      2. riordan bubble fitter — picks the most stable view among
+         identity / pascal / signed_pascal / sierpinski candidates by
+         bubble pressure / containment criteria (no SAT outcome leakage),
+         publishes ``fitted_view`` and may set ``veto_transformed``,
+      3. focus an unsat clause,
+      4. random walk kick (probability),
+      5. fitted coordinate ranker — runs on the chosen view, yields on
+         veto,
+      6. raw strain ranker — picks up when the fitted ranker yielded.
+
+    There is no hardcoded if-tree over transform families: the routing
+    is entirely a field-signal flow through the operator list.
+    """
+    return StrategyComposer(
+        operators=(
+            plateau_detector(),
+            riordan_bubble_fitter(),
+            unsat_clause_focus,
+            random_walk_kick(walk_probability),
+            fitted_coordinate_ranker,
             raw_strain_ranker,
         )
     )
