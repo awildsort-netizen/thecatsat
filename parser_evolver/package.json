@@ -5,6 +5,8 @@
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "tsx test.ts",
+    "brittleness-test": "tsx brittleness_test.ts",
+    "benchmark-brittleness": "tsx benchmark_brittleness.ts",
     "demo": "tsx demo.ts",
     "validate-fixtures": "tsx fixtures/validate.ts",
     "prepass": "tsx prepass/run.ts",

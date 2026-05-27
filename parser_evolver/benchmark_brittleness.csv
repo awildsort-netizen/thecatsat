@@ -1,0 +1,5 @@
+label,weight,top_genes,training_score,training_brittleness,rows_on_training,small_drift_score,small_drift_brittleness,small_drift_rows,small_motif_sim,large_drift_score,large_drift_brittleness,large_drift_rows,large_motif_sim
+baseline,0,"regex.emit.url >> regex.emit.date >> regex.emit.title >> row.assemble.proximity >> row.enforce.schema",2.95,0.033333333333333326,3,2.95,0.033333333333333326,3,0.9,2.95,0.033333333333333326,3,1
+brittle@1,1,"regex.emit.url >> regex.emit.date >> regex.emit.title >> row.assemble.proximity >> row.enforce.schema",2.916666666666667,0.033333333333333326,3,2.95,0.033333333333333326,3,0.9,2.95,0.033333333333333326,3,1
+brittle@3,3,"regex.emit.url >> regex.emit.date >> regex.emit.title >> row.assemble.proximity >> row.enforce.schema",2.85,0.033333333333333326,3,2.95,0.033333333333333326,3,0.9,2.95,0.033333333333333326,3,1
+brittle@7,7,"regex.emit.url >> regex.emit.date >> regex.emit.title >> row.assemble.proximity >> row.enforce.schema",2.716666666666667,0.033333333333333326,3,2.95,0.033333333333333326,3,0.9,2.95,0.033333333333333326,3,1
