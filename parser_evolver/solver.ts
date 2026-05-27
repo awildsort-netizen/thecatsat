@@ -14,6 +14,8 @@
 
 import { fit, similarity, embed } from "./embedding.js";
 import { signatureOf } from "./operator_reflection.js";
+import { brittlenessPenalty } from "./brittleness.js";
+import type { BrittlenessConfig } from "./brittleness.js";
 import type {
   CsvAF,
   Gene,
@@ -124,14 +126,31 @@ const evaluate = (
   af: CsvAF,
   genes: GeneString,
   ops: ReadonlyMap<string, ParseOperator>,
+  brittleness?: { weight: number; opsList: readonly ParseOperator[]; config?: BrittlenessConfig },
 ): ParseCandidate => {
   const trace = decompress(ctx, genes, ops);
   const rows = extractRows(trace.bag);
   const extraH = extractHallucinations(trace.bag);
   const diag = diagnostics(trace, rows, af, extraH);
   const base = af.scoreRun(rows);
-  const score = base - 0.1 * diag.complexity - 5 * diag.hallucinationRisk + progressBonus(trace.bag);
-  return { genes, rows, score, diagnostics: diag, traces: extractTraces(trace.bag) };
+  let score = base - 0.1 * diag.complexity - 5 * diag.hallucinationRisk + progressBonus(trace.bag);
+  const draft: ParseCandidate = { genes, rows, score, diagnostics: diag, traces: extractTraces(trace.bag) };
+  // Optional motif-invariance penalty. With weight 0 (default) this is
+  // a pure no-op — the score is identical to the legacy solver path.
+  // With weight > 0 the beam is pressured to prefer creatures whose
+  // motif survives semantics-preserving recompositions of the input.
+  if (brittleness && brittleness.weight > 0) {
+    const pen = brittlenessPenalty(draft, {
+      weight: brittleness.weight,
+      af,
+      ctx,
+      ops: brittleness.opsList,
+      config: brittleness.config,
+    });
+    score = score - pen;
+    return { ...draft, score };
+  }
+  return draft;
 };
 
 const availableChannels = (
@@ -192,6 +211,13 @@ export type BeamConfig = {
   // expansion step. Lower values let the embedding dominate; higher values
   // restore exhaustive enumeration.
   readonly extensionTopK: number;
+  // Optional motif-invariance penalty weight. Off by default (0). When
+  // set, the solver pressures the beam toward parser-creatures whose
+  // emitted motif survives semantics-preserving recompositions of the
+  // input (block reorder, whitespace dilation, date-format swap). See
+  // `brittleness.ts` for the metric and rationale.
+  readonly brittlenessWeight?: number;
+  readonly brittlenessConfig?: BrittlenessConfig;
 };
 
 const DEFAULTS: BeamConfig = { beam: 8, maxLen: 6, extensionTopK: 4 };
@@ -219,11 +245,15 @@ export const makeBeamSolver = (cfg: Partial<BeamConfig> = {}): Solver => {
       const opIndex = new Map(ops.map((o) => [o.id, o] as const));
       const tokens = afTokens(af);
       const seeds: readonly GeneString[] = seedGenes && seedGenes.length > 0 ? seedGenes : [[]];
+      const brittleness =
+        C.brittlenessWeight && C.brittlenessWeight > 0
+          ? { weight: C.brittlenessWeight, opsList: ops, config: C.brittlenessConfig }
+          : undefined;
 
       const extend = (cand: ParseCandidate): readonly ParseCandidate[] =>
         eligibleExtensions(af, ops, availableChannels(cand.genes, opIndex), C.extensionTopK).map(
           ({ op }) =>
-            evaluate(ctx, af, [...cand.genes, { operatorId: op.id } satisfies Gene], opIndex),
+            evaluate(ctx, af, [...cand.genes, { operatorId: op.id } satisfies Gene], opIndex, brittleness),
         );
 
       const dedupe = (xs: readonly ParseCandidate[]): readonly ParseCandidate[] => {
@@ -247,7 +277,7 @@ export const makeBeamSolver = (cfg: Partial<BeamConfig> = {}): Solver => {
       const advance = (cands: readonly ParseCandidate[]): readonly ParseCandidate[] =>
         rank([...cands, ...cands.flatMap(extend)]);
 
-      const initial = seeds.map((g) => evaluate(ctx, af, g, opIndex));
+      const initial = seeds.map((g) => evaluate(ctx, af, g, opIndex, brittleness));
       return Array.from({ length: C.maxLen }).reduce<readonly ParseCandidate[]>(
         (acc) => advance(acc),
         initial,
