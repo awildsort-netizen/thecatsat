@@ -14,6 +14,13 @@
 
 import { fit, similarity, embed } from "./embedding.js";
 import { signatureOf } from "./operator_reflection.js";
+import {
+  buildConflictGraph,
+  canonicaliseUnderCommutation,
+  redundanciesIn,
+  type ConflictGraph,
+  type InterferenceRegistry,
+} from "./interference.js";
 import type {
   CsvAF,
   Gene,
@@ -192,6 +199,18 @@ export type BeamConfig = {
   // expansion step. Lower values let the embedding dominate; higher values
   // restore exhaustive enumeration.
   readonly extensionTopK: number;
+  // Optional interference registry. When supplied, the solver builds a
+  // conflict graph from the operator set and (a) prunes candidate
+  // extensions whose new gene-string contains a redundancy (idempotent
+  // repeat or dominated-by-next-writer), (b) canonicalises gene-strings
+  // under commutation so order-equivalent candidates dedupe to a single
+  // representative. Absent registry = legacy behaviour, byte-identical.
+  readonly interferenceRegistry?: InterferenceRegistry;
+  // Optional measurement sink. The solver calls `onEvaluate()` once for
+  // every gene-string actually scored (i.e. *after* interference
+  // pruning). The caller supplies the counter; the solver pours into
+  // it. Used for benchmarking — does not affect search behaviour.
+  readonly onEvaluate?: () => void;
 };
 
 const DEFAULTS: BeamConfig = { beam: 8, maxLen: 6, extensionTopK: 4 };
@@ -220,16 +239,42 @@ export const makeBeamSolver = (cfg: Partial<BeamConfig> = {}): Solver => {
       const tokens = afTokens(af);
       const seeds: readonly GeneString[] = seedGenes && seedGenes.length > 0 ? seedGenes : [[]];
 
-      const extend = (cand: ParseCandidate): readonly ParseCandidate[] =>
-        eligibleExtensions(af, ops, availableChannels(cand.genes, opIndex), C.extensionTopK).map(
-          ({ op }) =>
-            evaluate(ctx, af, [...cand.genes, { operatorId: op.id } satisfies Gene], opIndex),
-        );
+      // Optional conflict graph. Built once per search call; the cost
+      // is linear in operators + edges and amortises across every
+      // beam-extension decision below.
+      const graph: ConflictGraph | undefined = C.interferenceRegistry
+        ? buildConflictGraph(ops, C.interferenceRegistry)
+        : undefined;
+
+      // A candidate gene-string is *prunable* if it contains any
+      // redundancy under the conflict graph. The check runs on the
+      // gene-id sequence, not on the evaluated candidate, so we never
+      // pay the cost of evaluating a dominated extension.
+      const isPrunable = (geneIds: readonly string[]): boolean =>
+        graph !== undefined && redundanciesIn(geneIds, graph).length > 0;
+
+      const extend = (cand: ParseCandidate): readonly ParseCandidate[] => {
+        const exts = eligibleExtensions(af, ops, availableChannels(cand.genes, opIndex), C.extensionTopK);
+        const productive = exts.filter(({ op }) => !isPrunable([...cand.genes.map((g) => g.operatorId), op.id]));
+        return productive.map(({ op }) => {
+          C.onEvaluate?.();
+          return evaluate(ctx, af, [...cand.genes, { operatorId: op.id } satisfies Gene], opIndex);
+        });
+      };
+
+      // Dedupe key: when a graph is present, canonicalise the gene-id
+      // sequence under known commutations so that gene-strings differing
+      // only by a commuting swap fold into a single representative.
+      const dedupeKey = (c: ParseCandidate): string => {
+        const ids = c.genes.map((g) => g.operatorId);
+        const canonical = graph !== undefined ? canonicaliseUnderCommutation(ids, graph) : ids;
+        return canonical.join(">>");
+      };
 
       const dedupe = (xs: readonly ParseCandidate[]): readonly ParseCandidate[] => {
         const seen = new Map<string, ParseCandidate>();
         xs.forEach((c) => {
-          const k = c.genes.map((g) => g.operatorId).join(">>");
+          const k = dedupeKey(c);
           const prior = seen.get(k);
           if (prior === undefined || c.score > prior.score) seen.set(k, c);
         });
@@ -247,7 +292,10 @@ export const makeBeamSolver = (cfg: Partial<BeamConfig> = {}): Solver => {
       const advance = (cands: readonly ParseCandidate[]): readonly ParseCandidate[] =>
         rank([...cands, ...cands.flatMap(extend)]);
 
-      const initial = seeds.map((g) => evaluate(ctx, af, g, opIndex));
+      const initial = seeds.map((g) => {
+        C.onEvaluate?.();
+        return evaluate(ctx, af, g, opIndex);
+      });
       return Array.from({ length: C.maxLen }).reduce<readonly ParseCandidate[]>(
         (acc) => advance(acc),
         initial,
