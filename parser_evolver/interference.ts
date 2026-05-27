@@ -26,7 +26,7 @@
 // type IS its signature).
 //
 // Instead, every trait value here *is its own contribution to the
-// analyses*. The composer (= `buildConflictGraph`, `basisCoherence`,
+// analyses*. The composer (= `buildConflictGraph`, `propagationCoherence`,
 // `redundanciesIn`) declares a small fixed set of folds — sinks for
 // replacing channels, accumulator channels, self-edges, commutation
 // offers — and iterates traits, calling each one's contribution
@@ -245,7 +245,7 @@ const pourSpec = (opId: string, spec: InterferenceSpec): ConflictSinks => {
   return sinks;
 };
 
-// Helpers used by the basis-coherence metric. These return the
+// Helpers used by the propagation-coherence metric. These return the
 // channel sets *after* pouring; they exist so callers don't have to
 // build sinks themselves.
 export const replacingChannelsOf = (spec: InterferenceSpec): readonly string[] => {
@@ -447,16 +447,28 @@ export const canonicaliseUnderCommutation = (
 };
 
 // ---------------------------------------------------------------------------
-// Basis-coherence metric
+// Propagation-coherence metric
 // ---------------------------------------------------------------------------
 //
-// A second-order signal: scores the operator set + AF *as a whole*,
-// independent of any particular creature. This is the metric the
-// propose() loop would optimise against when synthesising new
-// operators — closing a coverage gap raises coherence, producing dead
-// channels lowers it.
+// A second-order signal: scores the operator ecology + AF *as a whole*,
+// independent of any particular creature. Reframed from "basis-coherence"
+// to make the propagation ontology explicit:
+//
+//   coverage         — can the propagation reach the validated boundary?
+//   waste            — channels emitted that no downstream boundary reads,
+//                      i.e. propagators with nowhere to propagate
+//   conflictDensity  — destructive interference between propagators
+//                      (mutually-exclusive writers competing in a window)
+//   coherence        — coverage × (1 − waste) × exp(−conflictDensity)
+//
+// Read this not as an optimisation score but as the *thermodynamic
+// free-energy* of the operator ecology: high coherence = self-preserving
+// propagation regime; low coherence = leaks, dead branches, or
+// destructive interference. The propose() loop will optimise against
+// this metric by closing specific boundary failures (typed
+// HallucinationKinds).
 
-export type BasisCoherence = {
+export type PropagationCoherence = {
   readonly coverage: number;
   readonly waste: number;
   readonly conflictDensity: number;
@@ -480,11 +492,11 @@ const channelLikelyEmitsColumn = (channel: string, column: string): boolean => {
     .some((tok) => tok.startsWith(col));
 };
 
-export const basisCoherence = (
+export const propagationCoherence = (
   ops: readonly ParseOperator[],
   af: CsvAF,
   registry: InterferenceRegistry,
-): BasisCoherence => {
+): PropagationCoherence => {
   const graph = buildConflictGraph(ops, registry);
 
   const allInputs = new Set<string>();
@@ -550,5 +562,5 @@ export const basisCoherence = (
   };
 };
 
-export const summariseCoherence = (b: BasisCoherence): string =>
+export const summariseCoherence = (b: PropagationCoherence): string =>
   `coherence=${b.coherence.toFixed(3)} (coverage=${b.coverage.toFixed(2)}, waste=${b.waste.toFixed(2)}, conflict=${b.conflictDensity.toFixed(2)})`;

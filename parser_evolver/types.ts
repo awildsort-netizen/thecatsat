@@ -141,7 +141,12 @@ export type GeneString = readonly Gene[];
 export type ParseDiagnostics = {
   readonly coverage: number;
   readonly complexity: number;
-  readonly hallucinationRisk: number;
+  // Fraction of emitted cells that cannot be sourced from text. In the
+  // propagation ontology this is *boundary leakage*: how much of what
+  // the creature emits is uncontained by an evidence boundary in the
+  // input. Replaces the older name `hallucinationRisk`; same value,
+  // same coefficient in the solver, more honest about what it measures.
+  readonly boundaryLeakage: number;
   readonly stability?: number;
   // First-class typed pressure, summarised per kind.
   readonly pressure?: FailurePressure;

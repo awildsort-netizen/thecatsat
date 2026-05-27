@@ -9,7 +9,7 @@
 // so the system stays correct under absence-of-information.
 //
 // Why two files? `interference.ts` is the *type and algorithm*: the
-// shape of InterferenceSpec, the conflict graph, the basis-coherence
+// shape of InterferenceSpec, the conflict graph, the propagation-coherence
 // metric. This file is the *content*: which spec applies to which
 // operator. Splitting them keeps the algorithmic surface clean and
 // makes it easy to swap in a different operator basis without

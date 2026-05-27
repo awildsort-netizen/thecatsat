@@ -5,7 +5,7 @@
 // claim is right, we expect:
 //
 //   * derived ≅ authored on all three numbers (evals, score, gene)
-//   * derived ≅ authored on basis-coherence
+//   * derived ≅ authored on propagation-coherence
 //   * both registries beat legacy on evals
 //
 // If derived diverges from authored, that's the signal: either the
@@ -17,7 +17,7 @@ import { companyUpdatesAF, summarisePressure } from "./af.js";
 import { PRIMITIVES, makeEnforceSchema } from "./operators.js";
 import { makeBeamSolver } from "./solver.js";
 import { PRIMITIVE_INTERFERENCE } from "./operator_interference.js";
-import { basisCoherence, summariseCoherence, type InterferenceRegistry } from "./interference.js";
+import { propagationCoherence, summariseCoherence, type InterferenceRegistry } from "./interference.js";
 import {
   buildProbeFromPipeline,
   deriveRegistry,
@@ -122,9 +122,9 @@ console.log(
   `\nderived ≅ authored: ${sameAsAuthored ? "yes — identical evals, score, gene" : "NO"}`,
 );
 
-const cohA = basisCoherence(ops, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
-const cohD = basisCoherence(ops, companyUpdatesAF, derivedRegistry);
-console.log(`\nbasis-coherence:`);
+const cohA = propagationCoherence(ops, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
+const cohD = propagationCoherence(ops, companyUpdatesAF, derivedRegistry);
+console.log(`\npropagation-coherence:`);
 console.log(`  authored: ${summariseCoherence(cohA)}`);
 console.log(`  derived : ${summariseCoherence(cohD)}`);
 

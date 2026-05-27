@@ -47,7 +47,7 @@ import {
   purelyAdditive,
   redundanciesIn,
   replacing,
-  basisCoherence,
+  propagationCoherence,
   summariseCoherence,
   type InterferenceSpec,
 } from "./interference.js";
@@ -280,10 +280,10 @@ assert(
   !anyRedundantNormalizePair,
 );
 
-// --- basis-coherence sanity --------------------------------------------------
-const coherence = basisCoherence(ops, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
+// --- propagation-coherence sanity --------------------------------------------
+const coherence = propagationCoherence(ops, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
 assert(
-  "basis-coherence is in (0, 1]",
+  "propagation-coherence is in (0, 1]",
   coherence.coherence > 0 && coherence.coherence <= 1,
   `${summariseCoherence(coherence)}`,
 );
@@ -295,7 +295,7 @@ assert(
 
 // Sanity: removing the date emitter should make `date` uncovered.
 const opsWithoutDate = ops.filter((o) => o.id !== "regex.emit.date");
-const cohWithoutDate = basisCoherence(opsWithoutDate, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
+const cohWithoutDate = propagationCoherence(opsWithoutDate, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
 assert(
   "removing the date emitter drops coverage below 1",
   cohWithoutDate.coverage < 1,
