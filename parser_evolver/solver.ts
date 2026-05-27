@@ -104,13 +104,16 @@ const diagnostics = (
   const cells = rows.flatMap((r) => Object.values(r.fields));
   const unsourced = cells.filter((c) => c.span[1] <= c.span[0]).length;
   const allH = [...af.hallucinations(rows), ...extraHallucinations];
-  // hallucinationRisk: only "real" risk when cells exist. An empty creature
-  // is uninformative, not actively lying — keep its risk at 0 so the beam
-  // can climb past it as soon as one valid cell appears.
+  // boundaryLeakage: fraction of emitted cells whose evidence boundary is
+  // missing (empty span). In the propagation ontology, a hallucination
+  // is a cell that leaked out without a containing boundary in the
+  // source — leakage = boundary failure. An empty creature is
+  // uninformative, not actively leaking; keep its leakage at 0 so the
+  // beam can climb past it as soon as one bounded cell appears.
   return {
     coverage: rows.length === 0 ? 0 : cells.length / (rows.length * af.columns.length),
     complexity: trace.cost,
-    hallucinationRisk: cells.length === 0 ? 0 : unsourced / cells.length,
+    boundaryLeakage: cells.length === 0 ? 0 : unsourced / cells.length,
     stability: rows.length === 0 ? 0 : rows.filter((r) => r.score > 0.5).length / rows.length,
     pressure: { summary: summarise(allH) },
   };
@@ -137,7 +140,7 @@ const evaluate = (
   const extraH = extractHallucinations(trace.bag);
   const diag = diagnostics(trace, rows, af, extraH);
   const base = af.scoreRun(rows);
-  const score = base - 0.1 * diag.complexity - 5 * diag.hallucinationRisk + progressBonus(trace.bag);
+  const score = base - 0.1 * diag.complexity - 5 * diag.boundaryLeakage + progressBonus(trace.bag);
   return { genes, rows, score, diagnostics: diag, traces: extractTraces(trace.bag) };
 };
 

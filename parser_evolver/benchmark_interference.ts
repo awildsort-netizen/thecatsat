@@ -25,7 +25,7 @@ import { companyUpdatesAF, summarisePressure } from "./af.js";
 import { PRIMITIVES, makeEnforceSchema } from "./operators.js";
 import { makeBeamSolver } from "./solver.js";
 import { PRIMITIVE_INTERFERENCE } from "./operator_interference.js";
-import { basisCoherence, summariseCoherence } from "./interference.js";
+import { propagationCoherence, summariseCoherence } from "./interference.js";
 import type { ParseContext } from "./types.js";
 
 const SAMPLE = `
@@ -94,8 +94,8 @@ const runOnce = (label: string, useRegistry: boolean): Run => {
 const legacy = runOnce("legacy   ", false);
 const aware = runOnce("aware    ", true);
 
-// Basis-coherence report on the operator set as a whole.
-const coherence = basisCoherence(ops, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
+// Propagation-coherence report on the operator set as a whole.
+const coherence = propagationCoherence(ops, companyUpdatesAF, PRIMITIVE_INTERFERENCE);
 
 // --- output ---------------------------------------------------------------
 const fmt = (r: Run) =>
@@ -125,7 +125,7 @@ console.log(
     `   score \u0394=${scoreDelta >= 0 ? "+" : ""}${scoreDelta.toFixed(3)}`,
 );
 
-console.log(`\nbasis-coherence (over current operator set):`);
+console.log(`\npropagation-coherence (over current operator set):`);
 console.log(`  ${summariseCoherence(coherence)}`);
 if (coherence.uncoveredColumns.length > 0) {
   console.log(`  uncovered AF columns: ${coherence.uncoveredColumns.join(", ")}`);
